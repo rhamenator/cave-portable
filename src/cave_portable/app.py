@@ -45,6 +45,8 @@ class App:
         self.image_sources: dict[str, tuple[str, Image.Image]] = {}
         self.image_urls: dict[str, str] = {}
         self.resize_job: str | None = None
+        self.fallback_chrome = False
+        self.drag_origin: tuple[int, int, int, int] | None = None
         self.closed = False
         saved = preferences.load()
         self.country = tk.StringVar(value=saved.get("country", "US"))
@@ -72,15 +74,30 @@ class App:
 
         top = ttk.Frame(root, padding=(14, 10))
         top.pack(fill="x")
-        ttk.Label(top, text="CAVE PORTABLE", font=("Sans", 17, "bold"), foreground=ACCENT).pack(side="left")
-        ttk.Label(top, text="  NOAA / NWS / SPC", foreground=MUTED).pack(side="left")
+        drag_targets = [top]
+        self._header_icon = tk.PhotoImage(file=str(files("cave_portable").joinpath("assets/icon-32.png")))
+        icon_label = ttk.Label(top, image=self._header_icon)
+        icon_label.pack(side="left", padx=(0, 8))
+        drag_targets.append(icon_label)
+        title_label = ttk.Label(top, text="CAVE PORTABLE", font=("Sans", 17, "bold"), foreground=ACCENT)
+        title_label.pack(side="left")
+        drag_targets.append(title_label)
+        source_label = ttk.Label(top, text="  NOAA / NWS / SPC", foreground=MUTED)
+        source_label.pack(side="left")
+        drag_targets.append(source_label)
+        for target in drag_targets:
+            target.bind("<ButtonPress-1>", self._begin_window_drag)
+            target.bind("<B1-Motion>", self._drag_window)
         ttk.Button(top, text="Refresh current view", command=self.refresh).pack(side="right")
         self.alert_summary = tk.StringVar(value="NWS alerts: checking…")
         ttk.Button(top, textvariable=self.alert_summary, command=self._open_alerts).pack(side="right", padx=8)
         ttk.Button(top, text="Official warnings", command=self._open_official_warnings).pack(side="right")
 
         self.status = tk.StringVar(value="Ready · For urgent decisions, use official warnings and local instructions")
-        ttk.Label(root, textvariable=self.status, foreground=MUTED, padding=(14, 5)).pack(side="bottom", fill="x")
+        status_bar = ttk.Frame(root)
+        status_bar.pack(side="bottom", fill="x")
+        ttk.Label(status_bar, textvariable=self.status, foreground=MUTED, padding=(14, 5)).pack(side="left", fill="x", expand=True)
+        self.fallback_close = ttk.Button(status_bar, text="Close", width=6, command=self.close)
 
         self.tabs = ttk.Notebook(root)
         self.tabs.pack(fill="both", expand=True, padx=12, pady=(0, 8))
@@ -115,16 +132,27 @@ class App:
         self.root.after(80, self._present_window)
 
     def _present_window(self):
-        self.root.deiconify()
         self.root.lift()
         if sys.platform.startswith("linux") and os.environ.get("XDG_SESSION_TYPE") == "wayland":
-            self.root.attributes("-topmost", True)
-            self.root.bind("<FocusIn>", self._release_presentation, add="+")
+            self.root.after(700, self._recover_iconified_window)
 
-    def _release_presentation(self, _event):
-        if not self.closed:
-            self.root.attributes("-topmost", False)
-            self.root.unbind("<FocusIn>")
+    def _recover_iconified_window(self):
+        if self.closed or self.root.state() != "iconic":
+            return
+        self.fallback_chrome = True
+        self.fallback_close.pack(side="right", padx=8)
+        self.root.overrideredirect(True)
+        self.root.deiconify()
+        self.root.lift()
+
+    def _begin_window_drag(self, event):
+        if self.fallback_chrome:
+            self.drag_origin = (event.x_root, event.y_root, self.root.winfo_x(), self.root.winfo_y())
+
+    def _drag_window(self, event):
+        if self.fallback_chrome and self.drag_origin:
+            x0, y0, left, top = self.drag_origin
+            self.root.geometry(f"+{left + event.x_root - x0}+{top + event.y_root - y0}")
 
     def _observations_ui(self):
         locality = ttk.Frame(self.observations_tab)

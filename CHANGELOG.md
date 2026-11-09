@@ -1,9 +1,14 @@
 # Changelog
 
+## 0.1.3 — 2026-11-09
+
+- Point the Linux menu entry directly at the installed weather icon and show the icon in the app header.
+- Recover the window when GNOME Wayland immediately minimizes it; the fallback has a draggable header and Close button.
+
 ## 0.1.2 — 2026-11-09
 
 - Added a weather radar and storm icon to the window, desktop launcher, Windows executable, and macOS app.
-- Matched the Linux desktop launcher to the app window and present it above other windows at launch on GNOME Wayland until the user selects it.
+- Matched the Linux desktop launcher to the app window and added initial window presentation handling on GNOME Wayland (improved in 0.1.3).
 - Added a one-step per-user Linux installer to the release archive.
 
 ## 0.1.1 — 2026-11-09

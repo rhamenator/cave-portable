@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cave-portable"
-version = "0.1.2"
+version = "0.1.3"
 description = "A lightweight, cross-platform weather visualization companion to AWIPS CAVE"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,7 +24,7 @@ Issues = "https://github.com/rhamenator/cave-portable/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-cave_portable = ["assets/icon-64.png"]
+cave_portable = ["assets/icon-32.png", "assets/icon-64.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
