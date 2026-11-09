@@ -32,6 +32,37 @@ class DataTests(unittest.TestCase):
         with self.assertRaises(data.DataError):
             data.image("https://example.com/image.png")
 
+    @patch.object(data, "_fetch")
+    def test_point_alerts_select_actual_severe_alerts(self, fetch):
+        fetch.return_value = json.dumps({"features": [
+            {"id": "a", "properties": {"status": "Actual", "severity": "Severe", "event": "Severe Thunderstorm Warning", "headline": "Warning", "description": "Details"}},
+            {"id": "b", "properties": {"status": "Actual", "severity": "Minor", "event": "Advisory"}},
+            {"id": "c", "properties": {"status": "Test", "severity": "Extreme", "event": "Test"}},
+        ]}).encode()
+        alerts = data.point_alerts(42.23, -83.33)
+        self.assertEqual([item.identifier for item in alerts], ["a"])
+
+    @patch.object(data, "_json")
+    def test_canadian_alerts_filter_warning_and_expiry(self, fetch):
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        fetch.return_value = {"features": [
+            {"id": "a", "properties": {"alert_type": "warning", "status_en": "continued", "expiration_datetime": future, "alert_name_en": "Snowfall warning"}},
+            {"id": "b", "properties": {"alert_type": "statement", "expiration_datetime": future}},
+            {"id": "c", "properties": {"alert_type": "warning", "expiration_datetime": past}},
+        ]}
+        self.assertEqual([x.identifier for x in data.canadian_point_alerts(45.42, -75.70)], ["a"])
+
+    @patch.object(data, "_json")
+    def test_local_weather_rejects_stale_and_selects_nearest(self, fetch):
+        now = datetime.now(timezone.utc)
+        fetch.return_value = [
+            {"icaoId": "OLD", "lat": 45.42, "lon": -75.70, "temp": 3, "reportTime": (now - timedelta(hours=4)).isoformat()},
+            {"icaoId": "CYOW", "lat": 45.32, "lon": -75.67, "temp": 9, "reportTime": now.isoformat()},
+            {"icaoId": "CYUL", "lat": 45.47, "lon": -73.74, "temp": 8, "reportTime": now.isoformat()},
+        ]
+        self.assertEqual(data.nearby_metar(45.42, -75.70).station, "CYOW")
+
     @patch.object(data, "_fetch_with_time")
     def test_stale_image_is_rejected(self, fetch):
         fetch.return_value = (b"GIF89a" + b"\0" * 20, datetime.now(timezone.utc) - timedelta(hours=2))

@@ -9,7 +9,7 @@ import tkinter as tk
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
 
@@ -17,6 +17,8 @@ from . import __version__
 from . import data
 from . import model
 from . import radar
+from . import preferences
+from . import location
 
 BG = "#101923"
 FG = "#eef4f7"
@@ -38,6 +40,18 @@ class App:
         self.images: dict[str, ImageTk.PhotoImage] = {}
         self.image_urls: dict[str, str] = {}
         self.closed = False
+        saved = preferences.load()
+        self.country = tk.StringVar(value=saved.get("country", "US"))
+        self.postal_code = tk.StringVar(value=saved.get("postal_code", ""))
+        self.street = tk.StringVar(value=saved.get("street", ""))
+        self.postal_location: location.PostalLocation | None = None
+        self.monitor_enabled = tk.BooleanVar(value=saved.get("monitor_enabled", False) and bool(saved.get("postal_code")))
+        self.open_mini_on_location = self.monitor_enabled.get()
+        self.monitor_point: tuple[float, float] | None = None
+        self.monitor_seen: set[str] = set()
+        self.mini_window: tk.Toplevel | None = None
+        self.mini_weather = tk.StringVar(value="Set a ZIP or postal code to load local weather")
+        self.point_status = tk.StringVar(value="Set a ZIP or postal code for local weather and alerts")
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -57,7 +71,7 @@ class App:
         ttk.Button(top, text="Refresh current view", command=self.refresh).pack(side="right")
         self.alert_summary = tk.StringVar(value="NWS alerts: checking…")
         ttk.Button(top, textvariable=self.alert_summary, command=self._open_alerts).pack(side="right", padx=8)
-        ttk.Button(top, text="Official warnings", command=lambda: webbrowser.open("https://www.weather.gov/")).pack(side="right")
+        ttk.Button(top, text="Official warnings", command=self._open_official_warnings).pack(side="right")
 
         self.status = tk.StringVar(value="Ready · For urgent decisions, use official warnings and local instructions")
         ttk.Label(root, textvariable=self.status, foreground=MUTED, padding=(14, 5)).pack(side="bottom", fill="x")
@@ -86,15 +100,34 @@ class App:
         self.root.after(100, self._drain)
         self.root.after(300, self.refresh)
         self.root.after(500, self._refresh_alert_count)
+        if saved.get("postal_code"):
+            self.root.after(700, self.set_location)
         self.tick = 0
         self.root.after(60_000, self._periodic)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _observations_ui(self):
+        locality = ttk.Frame(self.observations_tab)
+        locality.pack(fill="x", pady=(0, 8))
+        ttk.Label(locality, text="Local weather and alerts · location required:").pack(side="left")
+        country_picker = ttk.Combobox(locality, textvariable=self.country, values=("US", "CA"), state="readonly", width=4)
+        country_picker.pack(side="left", padx=6)
+        country_picker.bind("<<ComboboxSelected>>", self._location_edited)
+        postal = ttk.Entry(locality, textvariable=self.postal_code, width=12)
+        postal.pack(side="left", padx=4)
+        postal.bind("<Return>", lambda _e: self.set_location())
+        postal.bind("<KeyRelease>", self._location_edited)
+        ttk.Button(locality, text="Set ZIP / postal code", command=self.set_location).pack(side="left", padx=4)
+        ttk.Label(locality, text="Street (optional):").pack(side="left", padx=(12, 2))
+        street_entry = ttk.Entry(locality, textvariable=self.street, width=22)
+        street_entry.pack(side="left", padx=4)
+        street_entry.bind("<KeyRelease>", self._location_edited)
+        street_entry.bind("<Return>", lambda _e: self.set_location())
+        ttk.Label(locality, text="No IP location", foreground=MUTED).pack(side="left", padx=8)
         bar = ttk.Frame(self.observations_tab)
         bar.pack(fill="x", pady=(0, 8))
         ttk.Label(bar, text="ICAO station:").pack(side="left")
-        self.station = tk.StringVar(value="KDTW")
+        self.station = tk.StringVar(value=preferences.load().get("station", "KDTW"))
         entry = ttk.Entry(bar, textvariable=self.station, width=9)
         entry.pack(side="left", padx=6)
         entry.bind("<Return>", lambda _e: self.load_station())
@@ -103,6 +136,14 @@ class App:
         self.state = tk.StringVar(value="MI")
         ttk.Entry(bar, textvariable=self.state, width=5).pack(side="left")
         ttk.Button(bar, text="Load alerts", command=self.load_alerts).pack(side="left", padx=5)
+
+        options = ttk.Frame(self.observations_tab)
+        options.pack(fill="x", pady=(0, 8))
+        ttk.Checkbutton(options, text="Monitor official warnings at postal area", variable=self.monitor_enabled, command=self._toggle_monitor).pack(side="left")
+        ttk.Button(options, text="Mini weather window", command=self._show_mini).pack(side="left", padx=8)
+        self.autostart = tk.BooleanVar(value=preferences.is_autostart_enabled())
+        ttk.Checkbutton(options, text="Start at login", variable=self.autostart, command=self._toggle_autostart).pack(side="left", padx=8)
+        ttk.Label(options, textvariable=self.point_status, foreground=MUTED).pack(side="right")
 
         columns = ("station", "name", "time", "temp", "wind", "visibility", "category")
         self.table = ttk.Treeview(self.observations_tab, columns=columns, show="headings", height=14)
@@ -191,6 +232,10 @@ class App:
                     self.alert_summary.set("NWS alerts unavailable")
                     if key == "alerts":
                         self._set_details("NWS alerts unavailable. Check weather.gov directly.")
+                elif key == "point-alerts":
+                    self.point_status.set("Local warning feed unavailable; check your official weather service")
+                elif key in ("location", "local-weather"):
+                    self.point_status.set(f"Local weather unavailable: {exc}")
         self.root.after(100, self._drain)
 
     def refresh(self):
@@ -239,6 +284,9 @@ class App:
             if self.tabs.index(self.tabs.select()) <= 2 or self.tick % 5 == 0:
                 self.refresh()
             self._refresh_alert_count()
+            self._refresh_point_alerts()
+            if self.postal_location and (self.monitor_enabled.get() or (self.mini_window is not None and self.mini_window.winfo_exists())) and self.tick % 5 == 0:
+                self._refresh_local_weather()
             self.root.after(60_000, self._periodic)
 
     def _refresh_alert_count(self):
@@ -256,6 +304,9 @@ class App:
     def _open_alerts(self):
         self.tabs.select(self.observations_tab)
         self.load_alerts()
+
+    def _open_official_warnings(self):
+        webbrowser.open("https://weather.gc.ca/" if self.country.get() == "CA" else "https://www.weather.gov/")
 
     def _show_observations(self, rows):
         self.table.delete(*self.table.get_children())
@@ -293,6 +344,69 @@ class App:
         else:
             self._set_details(f"{rows[0].name} · {rows[0].observed}\n\n{rows[0].raw}\n\nFORECAST\n{forecast}")
 
+    def set_location(self):
+        try:
+            country, code = location.validate_postal(self.country.get(), self.postal_code.get())
+        except data.DataError as exc:
+            self.status.set(str(exc))
+            self.point_status.set(str(exc))
+            return
+        self.point_status.set("Resolving postal area…")
+        street = self.street.get().strip()
+        self._submit("location", lambda: location.resolve(country, code, street), self._accept_location)
+
+    def _location_edited(self, _event):
+        if self.postal_location is not None:
+            previous = self.postal_location
+            self.postal_location = None
+            self.monitor_point = None
+            self.monitor_enabled.set(False)
+            preferences.save({"station": self._station_for_settings(), "country": previous.country,
+                              "postal_code": previous.code, "street": previous.street, "monitor_enabled": False})
+            self.point_status.set("Set the new ZIP or postal code to resume local weather and alerts")
+
+    def _save_preferences(self):
+        preferences.save({"station": self._station_for_settings(), "country": self.country.get(),
+                          "postal_code": self.postal_code.get(), "street": self.street.get(),
+                          "monitor_enabled": self.monitor_enabled.get()})
+
+    def _station_for_settings(self):
+        try:
+            return data.validate_station(self.station.get())
+        except data.DataError:
+            return preferences.load().get("station", "KDTW")
+
+    def _accept_location(self, resolved: location.PostalLocation):
+        try:
+            current = location.validate_postal(self.country.get(), self.postal_code.get())
+        except data.DataError:
+            return
+        if (resolved.country, resolved.code) != current or resolved.street != self.street.get().strip():
+            return
+        prior = self.postal_location
+        if prior != resolved:
+            self.monitor_seen.clear()
+        self.postal_location = resolved
+        self.postal_code.set(resolved.code)
+        self.monitor_point = (resolved.lat, resolved.lon) if self.monitor_enabled.get() else None
+        self.point_status.set(resolved.label)
+        self._save_preferences()
+        self._refresh_local_weather()
+        self._refresh_point_alerts()
+        if self.open_mini_on_location:
+            self.open_mini_on_location = False
+            self._show_mini()
+
+    def _refresh_local_weather(self):
+        if self.postal_location:
+            target = self.postal_location
+            self._submit("local-weather", lambda: (target, data.nearby_metar(target.lat, target.lon)), self._accept_local_weather)
+
+    def _accept_local_weather(self, result):
+        target, row = result
+        if target == self.postal_location:
+            self._update_mini(row)
+
     def load_alerts(self):
         self._submit("alerts", lambda: data.alerts(self.state.get()), self._show_alerts)
 
@@ -327,6 +441,80 @@ class App:
         photo = ImageTk.PhotoImage(pil_image, master=self.root)
         self.images[key] = photo
         getattr(self, key + "_image").configure(image=photo, text="")
+
+    def _update_mini(self, row: data.Observation):
+        temperature = f"{row.temp_c:.1f} °C" if row.temp_c is not None else "Temperature unavailable"
+        code = self.postal_location.code if self.postal_location else "Local"
+        self.mini_weather.set(f"{code} · {temperature}\n{row.conditions} · {row.station} airport · {row.observed}")
+
+    def _show_mini(self):
+        if self.postal_location is None:
+            self.status.set("Set a valid ZIP or postal code before opening local weather")
+            return
+        if self.mini_window is not None and self.mini_window.winfo_exists():
+            self.mini_window.lift()
+            return
+        mini = tk.Toplevel(self.root)
+        mini.title("CAVE Portable weather")
+        mini.geometry("300x145")
+        mini.minsize(260, 125)
+        mini.configure(bg=BG)
+        mini.attributes("-topmost", True)
+        ttk.Label(mini, textvariable=self.mini_weather, font=("Sans", 12, "bold"), padding=12).pack(fill="x")
+        ttk.Label(mini, textvariable=self.point_status, foreground=MUTED, padding=(12, 0)).pack(fill="x")
+        ttk.Button(mini, text="Open main view", command=lambda: (self.root.deiconify(), self.root.lift())).pack(anchor="e", padx=10, pady=4)
+        self.mini_window = mini
+        self._refresh_local_weather()
+
+    def _toggle_monitor(self):
+        if self.monitor_enabled.get():
+            if self.postal_location is None:
+                self.monitor_enabled.set(False)
+                self.status.set("Set a valid ZIP or postal code before enabling local warnings")
+                return
+            self.monitor_seen.clear()
+            self.monitor_point = (self.postal_location.lat, self.postal_location.lon)
+            self._refresh_point_alerts()
+        else:
+            self.monitor_point = None
+            self.point_status.set("Local alert monitor off")
+        self._save_preferences()
+
+    def _toggle_autostart(self):
+        if self.autostart.get() and self.postal_location is None:
+            self.autostart.set(False)
+            self.status.set("Set a valid ZIP or postal code before enabling start at login")
+            return
+        try:
+            preferences.set_autostart(self.autostart.get())
+            self.status.set("Start at login " + ("enabled" if self.autostart.get() else "disabled"))
+        except OSError as exc:
+            self.autostart.set(not self.autostart.get())
+            self.status.set(f"Could not update login startup: {exc}")
+
+    def _refresh_point_alerts(self):
+        if self.monitor_enabled.get() and self.monitor_point is not None and self.postal_location:
+            lat, lon = self.monitor_point
+            country = self.postal_location.country
+            self._submit("point-alerts", lambda: (lat, lon, country, data.point_alerts(lat, lon) if country == "US" else data.canadian_point_alerts(lat, lon)), self._accept_point_alerts)
+
+    def _accept_point_alerts(self, result):
+        lat, lon, country, alerts = result
+        if self.monitor_point == (lat, lon) and self.postal_location and self.postal_location.country == country:
+            self._show_point_alerts(alerts)
+
+    def _show_point_alerts(self, alerts: list[data.WeatherAlert]):
+        if not self.monitor_enabled.get():
+            return
+        area = self.postal_location.code if self.postal_location else "postal area"
+        agency = "NWS" if self.postal_location and self.postal_location.country == "US" else "ECCC"
+        self.point_status.set(f"{area} centroid · {len(alerts)} {agency} warning(s)")
+        fresh = [alert for alert in alerts if alert.identifier not in self.monitor_seen]
+        self.monitor_seen.update(alert.identifier for alert in alerts)
+        if fresh:
+            self.root.bell()
+            summary = "\n\n".join(f"{alert.event}: {alert.headline}\n{alert.description[:500]}" for alert in fresh[:3])
+            messagebox.showwarning("New " + agency + " warning near " + area, summary + "\n\nCheck official local guidance immediately.", parent=self.root)
 
     def close(self):
         self.closed = True
