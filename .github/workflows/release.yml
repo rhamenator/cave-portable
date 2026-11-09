@@ -6,6 +6,7 @@ on:
 jobs:
   bundle:
     strategy:
+      max-parallel: 2
       matrix:
         include:
           - os: ubuntu-latest
