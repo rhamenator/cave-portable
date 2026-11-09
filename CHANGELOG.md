@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 — 2026-11-09
+
+- Kept map legends, product controls, and source times visible when the desktop window is shorter.
+- Reflowed location controls and improved the mini weather window layout.
+- Cleared old mini weather readings when a refresh cannot find a recent observation.
+
 ## 0.1.0 — 2026-11-09
 
 - Initial lightweight desktop client for national and single-site radar, satellite, METAR, TAF, NWS alerts, SPC Day 1–3 outlooks, current MLCAPE, and GFS forecast CAPE.

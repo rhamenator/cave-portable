@@ -31,14 +31,16 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(f"CAVE Portable {__version__}")
-        self.root.geometry("1040x760")
-        self.root.minsize(720, 540)
+        self.root.geometry("1000x640")
+        self.root.minsize(900, 600)
         self.root.configure(bg=BG)
         self.pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="weather")
         self.results: queue.Queue = queue.Queue()
         self.pending: set[str] = set()
         self.images: dict[str, ImageTk.PhotoImage] = {}
+        self.image_sources: dict[str, tuple[str, Image.Image]] = {}
         self.image_urls: dict[str, str] = {}
+        self.resize_job: str | None = None
         self.closed = False
         saved = preferences.load()
         self.country = tk.StringVar(value=saved.get("country", "US"))
@@ -67,7 +69,7 @@ class App:
         top = ttk.Frame(root, padding=(14, 10))
         top.pack(fill="x")
         ttk.Label(top, text="CAVE PORTABLE", font=("Sans", 17, "bold"), foreground=ACCENT).pack(side="left")
-        ttk.Label(top, text="  Weather visualization • NOAA / NWS / SPC", foreground=MUTED).pack(side="left")
+        ttk.Label(top, text="  NOAA / NWS / SPC", foreground=MUTED).pack(side="left")
         ttk.Button(top, text="Refresh current view", command=self.refresh).pack(side="right")
         self.alert_summary = tk.StringVar(value="NWS alerts: checking…")
         ttk.Button(top, textvariable=self.alert_summary, command=self._open_alerts).pack(side="right", padx=8)
@@ -105,11 +107,12 @@ class App:
         self.tick = 0
         self.root.after(60_000, self._periodic)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.bind("<Configure>", self._schedule_image_resize)
 
     def _observations_ui(self):
         locality = ttk.Frame(self.observations_tab)
         locality.pack(fill="x", pady=(0, 8))
-        ttk.Label(locality, text="Local weather and alerts · location required:").pack(side="left")
+        ttk.Label(locality, text="Local weather and alerts · ZIP / postal code required:").pack(side="left")
         country_picker = ttk.Combobox(locality, textvariable=self.country, values=("US", "CA"), state="readonly", width=4)
         country_picker.pack(side="left", padx=6)
         country_picker.bind("<<ComboboxSelected>>", self._location_edited)
@@ -118,12 +121,15 @@ class App:
         postal.bind("<Return>", lambda _e: self.set_location())
         postal.bind("<KeyRelease>", self._location_edited)
         ttk.Button(locality, text="Set ZIP / postal code", command=self.set_location).pack(side="left", padx=4)
-        ttk.Label(locality, text="Street (optional):").pack(side="left", padx=(12, 2))
-        street_entry = ttk.Entry(locality, textvariable=self.street, width=22)
-        street_entry.pack(side="left", padx=4)
+        ttk.Label(locality, text="No IP location", foreground=MUTED).pack(side="left", padx=8)
+        address = ttk.Frame(self.observations_tab)
+        address.pack(fill="x", pady=(0, 8))
+        ttk.Label(address, text="Street address (optional):").pack(side="left")
+        street_entry = ttk.Entry(address, textvariable=self.street, width=38)
+        street_entry.pack(side="left", padx=6)
         street_entry.bind("<KeyRelease>", self._location_edited)
         street_entry.bind("<Return>", lambda _e: self.set_location())
-        ttk.Label(locality, text="No IP location", foreground=MUTED).pack(side="left", padx=8)
+        ttk.Label(address, text="Approximate geocode", foreground=MUTED).pack(side="left", padx=6)
         bar = ttk.Frame(self.observations_tab)
         bar.pack(fill="x", pady=(0, 8))
         ttk.Label(bar, text="ICAO station:").pack(side="left")
@@ -143,16 +149,21 @@ class App:
         ttk.Button(options, text="Mini weather window", command=self._show_mini).pack(side="left", padx=8)
         self.autostart = tk.BooleanVar(value=preferences.is_autostart_enabled())
         ttk.Checkbutton(options, text="Start at login", variable=self.autostart, command=self._toggle_autostart).pack(side="left", padx=8)
-        ttk.Label(options, textvariable=self.point_status, foreground=MUTED).pack(side="right")
+        ttk.Label(self.observations_tab, textvariable=self.point_status, foreground=MUTED).pack(fill="x", pady=(0, 8))
 
         columns = ("station", "name", "time", "temp", "wind", "visibility", "category")
-        self.table = ttk.Treeview(self.observations_tab, columns=columns, show="headings", height=14)
+        table_frame = ttk.Frame(self.observations_tab)
+        table_frame.pack(fill="both", expand=True)
+        self.table = ttk.Treeview(table_frame, columns=columns, show="headings", height=4)
         for key, title, width in (("station", "ICAO", 65), ("name", "Location", 220), ("time", "Observed", 140), ("temp", "°C", 55), ("wind", "Wind", 100), ("visibility", "Vis. mi", 70), ("category", "Flight", 70)):
             self.table.heading(key, text=title)
             self.table.column(key, width=width, minwidth=45, stretch=key == "name")
-        self.table.pack(fill="both", expand=True)
+        self.table.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.table.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.table.configure(yscrollcommand=scrollbar.set)
         self.table.bind("<<TreeviewSelect>>", self._select_station)
-        self.details = tk.Text(self.observations_tab, height=9, wrap="word", bg="#172632", fg=FG, insertbackground=FG, relief="flat", padx=10, pady=8)
+        self.details = tk.Text(self.observations_tab, height=3, wrap="word", bg="#172632", fg=FG, insertbackground=FG, relief="flat", padx=10, pady=8)
         self.details.pack(fill="x", pady=(8, 0))
         self.details.insert("1.0", "Select an observation or load a station. METAR and TAF from NOAA Aviation Weather Center. Alerts from NWS.")
         self.details.configure(state="disabled")
@@ -227,6 +238,7 @@ class App:
                     image_key = "radar" if key == "site-radar" else key
                     getattr(self, image_key + "_image").configure(image="", text=str(exc))
                     self.images.pop(image_key, None)
+                    self.image_sources.pop(image_key, None)
                     getattr(self, image_key + "_stamp").set("No current image available")
                 elif key in ("alerts", "alert-count"):
                     self.alert_summary.set("NWS alerts unavailable")
@@ -236,6 +248,8 @@ class App:
                     self.point_status.set("Local warning feed unavailable; check your official weather service")
                 elif key in ("location", "local-weather"):
                     self.point_status.set(f"Local weather unavailable: {exc}")
+                    if key == "local-weather":
+                        self.mini_weather.set("Nearby observation unavailable\nCheck the official weather service")
         self.root.after(100, self._drain)
 
     def refresh(self):
@@ -438,14 +452,34 @@ class App:
         if self.image_urls.get(key) != url:
             self.root.after(0, self.refresh)
             return
-        photo = ImageTk.PhotoImage(pil_image, master=self.root)
+        self.image_sources[key] = (url, pil_image)
+        self._render_image(key, pil_image)
+
+    def _render_image(self, key, source):
+        picture = source.copy()
+        picture.thumbnail((max(400, self.root.winfo_width() - 60),
+                           max(240, self.root.winfo_height() - 270)), Image.Resampling.LANCZOS)
+        photo = ImageTk.PhotoImage(picture, master=self.root)
         self.images[key] = photo
         getattr(self, key + "_image").configure(image=photo, text="")
+
+    def _schedule_image_resize(self, event):
+        if event.widget is not self.root or not self.image_sources or self.closed:
+            return
+        if self.resize_job:
+            self.root.after_cancel(self.resize_job)
+        self.resize_job = self.root.after(180, self._resize_images)
+
+    def _resize_images(self):
+        self.resize_job = None
+        for key, (url, source) in self.image_sources.items():
+            if self.image_urls.get(key) == url:
+                self._render_image(key, source)
 
     def _update_mini(self, row: data.Observation):
         temperature = f"{row.temp_c:.1f} °C" if row.temp_c is not None else "Temperature unavailable"
         code = self.postal_location.code if self.postal_location else "Local"
-        self.mini_weather.set(f"{code} · {temperature}\n{row.conditions} · {row.station} airport · {row.observed}")
+        self.mini_weather.set(f"{code} · {temperature}\n{row.conditions} · {row.station} airport\nObserved {row.observed}")
 
     def _show_mini(self):
         if self.postal_location is None:
@@ -456,12 +490,11 @@ class App:
             return
         mini = tk.Toplevel(self.root)
         mini.title("CAVE Portable weather")
-        mini.geometry("300x145")
-        mini.minsize(260, 125)
+        mini.geometry("370x180")
+        mini.minsize(340, 160)
         mini.configure(bg=BG)
-        mini.attributes("-topmost", True)
-        ttk.Label(mini, textvariable=self.mini_weather, font=("Sans", 12, "bold"), padding=12).pack(fill="x")
-        ttk.Label(mini, textvariable=self.point_status, foreground=MUTED, padding=(12, 0)).pack(fill="x")
+        ttk.Label(mini, textvariable=self.mini_weather, font=("Sans", 12, "bold"), padding=12, wraplength=345).pack(fill="x")
+        ttk.Label(mini, textvariable=self.point_status, foreground=MUTED, padding=(12, 0), wraplength=345).pack(fill="x")
         ttk.Button(mini, text="Open main view", command=lambda: (self.root.deiconify(), self.root.lift())).pack(anchor="e", padx=10, pady=4)
         self.mini_window = mini
         self._refresh_local_weather()

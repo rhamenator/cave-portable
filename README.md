@@ -2,7 +2,7 @@
 
 A lightweight, cross-platform weather viewer inspired by the needs of AWIPS CAVE users. This is an **independent companion**, not a fork or replacement for the full AWIPS CAVE workstation. It runs without an EDEX server and does not issue warnings or generate its own convective forecast.
 
-## What works in 0.1.0
+## What works in 0.1.1
 
 - National radar composite from NOAA/NWS, single-site reflectivity and storm-relative Doppler velocity from Iowa Environmental Mesonet, and GOES East/West GeoColor satellite imagery from NOAA/NESDIS.
 - Current METAR observations at 24 US airports, direct ICAO station lookup, raw METAR and TAF, and active NWS alerts by state.

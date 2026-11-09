@@ -2,7 +2,7 @@
 
 ## Current release
 
-0.1.0 is a small weather viewer with observed weather, national and single-site radar imagery, satellite imagery, Southern Plains MLCAPE, a bounded GFS CAPE forecast view, official SPC outlooks, required US ZIP or full Canadian postal entry for local weather, and opt-in NWS/ECCC warning monitoring and mini weather window. It has no AWIPS EDEX protocol integration, interactive geospatial layers, soundings, GFE editing, EAS/WEA reception, or warning issuance. Correlation coefficient and hail products are not yet available in the verified live imagery feed, so they are not shown as if current. Canadian location uses an approximate FSA centroid.
+0.1.1 is a small weather viewer with observed weather, national and single-site radar imagery, satellite imagery, Southern Plains MLCAPE, a bounded GFS CAPE forecast view, official SPC outlooks, required US ZIP or full Canadian postal entry for local weather, and opt-in NWS/ECCC warning monitoring and mini weather window. It has no AWIPS EDEX protocol integration, interactive geospatial layers, soundings, GFE editing, EAS/WEA reception, or warning issuance. Correlation coefficient and hail products are not yet available in the verified live imagery feed, so they are not shown as if current. Canadian location uses an approximate FSA centroid.
 
 ## Next milestones
 
