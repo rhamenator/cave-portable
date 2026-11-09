@@ -1,0 +1,135 @@
+"""Bounded, read-only requests to public NOAA weather services."""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+USER_AGENT = "CAVE-Portable/0.1 (https://github.com/rhamenator/cave-portable)"
+STATIONS = (
+    "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
+    "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KATL", "KMIA", "KBOS",
+    "KJFK", "KDCA", "KCLT", "KMCI", "KSTL", "KBNA", "KMSY", "KABQ",
+)
+RADAR_URL = "https://radar.weather.gov/ridge/standard/CONUS_0.gif"
+SATELLITE = {
+    "GOES East": "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/CONUS/GEOCOLOR/1250x750.jpg",
+    "GOES West": "https://cdn.star.nesdis.noaa.gov/GOES18/ABI/CONUS/GEOCOLOR/1250x750.jpg",
+}
+OUTLOOK = {
+    "Day 1": "https://www.spc.noaa.gov/products/outlook/day1otlk.png",
+    "Day 2": "https://www.spc.noaa.gov/products/outlook/day2otlk.png",
+    "Day 3": "https://www.spc.noaa.gov/products/outlook/day3otlk.png",
+}
+MLCAPE_URL = "https://www.spc.noaa.gov/exper/mesoanalysis/s11/mlcp/mlcp.gif"
+MAX_JSON = 2_000_000
+MAX_IMAGE = 5_000_000
+
+
+class DataError(Exception):
+    """A weather service could not supply usable data."""
+
+
+@dataclass(frozen=True)
+class Observation:
+    station: str
+    name: str
+    observed: str
+    temp_c: float | None
+    wind: str
+    visibility: str
+    flight_category: str
+    raw: str
+
+
+def _fetch(url: str, maximum: int, accept: str) -> bytes:
+    if not url.startswith("https://"):
+        raise DataError("Only HTTPS weather sources are allowed")
+    request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
+    try:
+        with urlopen(request, timeout=12) as response:
+            if response.status != 200:
+                raise DataError(f"Weather service returned HTTP {response.status}")
+            payload = response.read(maximum + 1)
+            if len(payload) > maximum:
+                raise DataError("Weather response exceeded its size limit")
+            return payload
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        raise DataError(f"Weather service unavailable: {exc}") from exc
+
+
+def _json(url: str):
+    try:
+        return json.loads(_fetch(url, MAX_JSON, "application/json"))
+    except (ValueError, UnicodeError) as exc:
+        raise DataError("Weather service returned invalid JSON") from exc
+
+
+def validate_station(station: str) -> str:
+    station = station.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{4}", station):
+        raise DataError("Enter a four-character ICAO station code, such as KDTW")
+    return station
+
+
+def metars(stations: tuple[str, ...] = STATIONS) -> list[Observation]:
+    ids = ",".join(validate_station(s) for s in stations)
+    url = "https://aviationweather.gov/api/data/metar?" + urlencode({"ids": ids, "format": "json"})
+    payload = _json(url)
+    if not isinstance(payload, list):
+        raise DataError("Unexpected METAR response")
+    output = []
+    for row in payload[:100]:
+        if not isinstance(row, dict):
+            continue
+        observed = row.get("reportTime") or ""
+        if observed:
+            try:
+                observed = datetime.fromisoformat(observed.replace("Z", "+00:00")).astimezone(timezone.utc).strftime("%d %b %H:%M UTC")
+            except ValueError:
+                observed = "Unknown time"
+        direction, speed = row.get("wdir"), row.get("wspd")
+        wind = "—" if speed is None else f"{direction if direction is not None else 'VRB'}° {speed} kt"
+        output.append(Observation(
+            station=str(row.get("icaoId") or "")[:8], name=str(row.get("name") or "")[:90],
+            observed=observed, temp_c=row.get("temp") if isinstance(row.get("temp"), (int, float)) else None,
+            wind=wind, visibility=str(row.get("visib") or "—"),
+            flight_category=str(row.get("fltCat") or "—"), raw=str(row.get("rawOb") or "")[:700],
+        ))
+    return output
+
+
+def taf(station: str) -> str:
+    url = "https://aviationweather.gov/api/data/taf?" + urlencode({"ids": validate_station(station), "format": "json"})
+    payload = _json(url)
+    if not isinstance(payload, list):
+        raise DataError("Unexpected TAF response")
+    return str(payload[0].get("rawTAF") or "No forecast available")[:5000] if payload else "No forecast available"
+
+
+def alerts(state: str) -> list[tuple[str, str, str]]:
+    state = state.strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", state):
+        raise DataError("Enter a two-letter US state code, such as MI")
+    payload = _json("https://api.weather.gov/alerts/active?" + urlencode({"area": state}))
+    if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+        raise DataError("Unexpected alerts response")
+    result = []
+    for feature in payload["features"][:100]:
+        prop = feature.get("properties", {}) if isinstance(feature, dict) else {}
+        result.append((str(prop.get("event") or "Alert")[:100], str(prop.get("headline") or "")[:300], str(prop.get("description") or "")[:5000]))
+    return result
+
+
+def image(url: str) -> bytes:
+    if url not in (RADAR_URL, MLCAPE_URL, *SATELLITE.values(), *OUTLOOK.values()):
+        raise DataError("Unknown imagery source")
+    data = _fetch(url, MAX_IMAGE, "image/*")
+    if not (data.startswith(b"GIF87a") or data.startswith(b"GIF89a") or data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n")):
+        raise DataError("Weather service returned an unexpected image")
+    return data

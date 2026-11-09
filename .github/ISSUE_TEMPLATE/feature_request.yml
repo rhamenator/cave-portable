@@ -1,0 +1,13 @@
+name: Feature request
+description: Suggest a weather workflow or accessibility improvement
+body:
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Weather workflow and user need
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Suggested authoritative data source
