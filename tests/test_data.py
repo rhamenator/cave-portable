@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from cave_portable import data
@@ -30,6 +31,12 @@ class DataTests(unittest.TestCase):
     def test_images_are_allowlisted(self):
         with self.assertRaises(data.DataError):
             data.image("https://example.com/image.png")
+
+    @patch.object(data, "_fetch_with_time")
+    def test_stale_image_is_rejected(self, fetch):
+        fetch.return_value = (b"GIF89a" + b"\0" * 20, datetime.now(timezone.utc) - timedelta(hours=2))
+        with self.assertRaisesRegex(data.DataError, "stale"):
+            data.image_record(data.RADAR_URL)
 
 
 if __name__ == "__main__":

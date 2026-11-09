@@ -6,6 +6,7 @@ import io
 import queue
 import sys
 import tkinter as tk
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from tkinter import ttk
@@ -14,6 +15,8 @@ from PIL import Image, ImageTk
 
 from . import __version__
 from . import data
+from . import model
+from . import radar
 
 BG = "#101923"
 FG = "#eef4f7"
@@ -52,6 +55,12 @@ class App:
         ttk.Label(top, text="CAVE PORTABLE", font=("Sans", 17, "bold"), foreground=ACCENT).pack(side="left")
         ttk.Label(top, text="  Weather visualization • NOAA / NWS / SPC", foreground=MUTED).pack(side="left")
         ttk.Button(top, text="Refresh current view", command=self.refresh).pack(side="right")
+        self.alert_summary = tk.StringVar(value="NWS alerts: checking…")
+        ttk.Button(top, textvariable=self.alert_summary, command=self._open_alerts).pack(side="right", padx=8)
+        ttk.Button(top, text="Official warnings", command=lambda: webbrowser.open("https://www.weather.gov/")).pack(side="right")
+
+        self.status = tk.StringVar(value="Ready · For urgent decisions, use official warnings and local instructions")
+        ttk.Label(root, textvariable=self.status, foreground=MUTED, padding=(14, 5)).pack(side="bottom", fill="x")
 
         self.tabs = ttk.Notebook(root)
         self.tabs.pack(fill="both", expand=True, padx=12, pady=(0, 8))
@@ -59,7 +68,8 @@ class App:
         self.radar_tab = ttk.Frame(self.tabs, padding=10)
         self.satellite_tab = ttk.Frame(self.tabs, padding=10)
         self.severe_tab = ttk.Frame(self.tabs, padding=10)
-        for frame, title in ((self.observations_tab, "Observations"), (self.radar_tab, "Radar"), (self.satellite_tab, "Satellite"), (self.severe_tab, "Severe outlook & CAPE")):
+        self.model_tab = ttk.Frame(self.tabs, padding=10)
+        for frame, title in ((self.observations_tab, "Observations"), (self.radar_tab, "Radar"), (self.satellite_tab, "Satellite"), (self.severe_tab, "Severe outlook & CAPE"), (self.model_tab, "Forecast CAPE")):
             self.tabs.add(frame, text=title)
         self.tabs.bind("<<NotebookTabChanged>>", lambda _e: self.refresh())
 
@@ -67,14 +77,17 @@ class App:
         self._image_ui(self.radar_tab, "radar", "NOAA/NWS national radar composite · latest available image")
         self._image_ui(self.satellite_tab, "satellite", "NOAA/NESDIS GOES GeoColor · latest available image")
         self._image_ui(self.severe_tab, "severe", "SPC convective outlooks and Southern Plains MLCAPE analysis")
+        self._image_ui(self.model_tab, "model", "GFS surface-based CAPE forecast · NSF Unidata THREDDS / USGS map")
         self._satellite_controls()
         self._severe_controls()
+        self._model_controls()
+        self._radar_controls()
 
-        self.status = tk.StringVar(value="Ready")
-        ttk.Label(root, textvariable=self.status, foreground=MUTED, padding=(14, 5)).pack(fill="x")
         self.root.after(100, self._drain)
         self.root.after(300, self.refresh)
-        self.root.after(300_000, self._periodic)
+        self.root.after(500, self._refresh_alert_count)
+        self.tick = 0
+        self.root.after(60_000, self._periodic)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _observations_ui(self):
@@ -111,7 +124,9 @@ class App:
         setattr(self, key + "_image", label)
         setattr(self, key + "_controls", ttk.Frame(frame))
         getattr(self, key + "_controls").pack(fill="x", pady=6)
-        ttk.Label(frame, text="Images show source-provided valid times and legends. Refresh to request the latest product.", foreground=MUTED).pack(anchor="w")
+        stamp = tk.StringVar(value="Source time pending. Images show source-provided valid times and legends when present.")
+        setattr(self, key + "_stamp", stamp)
+        ttk.Label(frame, textvariable=stamp, foreground=MUTED).pack(anchor="w")
 
     def _satellite_controls(self):
         self.satellite_choice = tk.StringVar(value="GOES East")
@@ -123,6 +138,27 @@ class App:
         for title in (*data.OUTLOOK, "Southern Plains MLCAPE"):
             ttk.Radiobutton(self.severe_controls, text=title, value=title, variable=self.severe_choice, command=self.refresh).pack(side="left", padx=6)
         ttk.Label(self.severe_controls, text="CAPE is instability, not a standalone severe forecast.", foreground=MUTED).pack(side="right")
+
+    def _model_controls(self):
+        ttk.Label(self.model_controls, text="Hours after next 3-hour UTC slot:").pack(side="left", padx=6)
+        self.model_hour = tk.StringVar(value="24")
+        picker = ttk.Combobox(self.model_controls, textvariable=self.model_hour, values=[str(hour) for hour in model.HOURS], state="readonly", width=5)
+        picker.pack(side="left", padx=6)
+        picker.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
+        self.model_valid = tk.StringVar(value="Choose a forecast time; the GFS best time series may combine runs.")
+        ttk.Label(self.model_controls, textvariable=self.model_valid, foreground=MUTED).pack(side="left", padx=12)
+
+    def _radar_controls(self):
+        self.radar_product = tk.StringVar(value="National reflectivity")
+        product = ttk.Combobox(self.radar_controls, textvariable=self.radar_product, values=("National reflectivity", *radar.PRODUCTS), state="readonly", width=24)
+        product.pack(side="left", padx=6)
+        product.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
+        self.radar_site = tk.StringVar(value="DTX · Detroit")
+        site = ttk.Combobox(self.radar_controls, textvariable=self.radar_site, values=tuple(radar.SITES), state="readonly", width=25)
+        site.pack(side="left", padx=6)
+        site.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
+        self.radar_valid = tk.StringVar(value="National composite · NOAA/NWS")
+        ttk.Label(self.radar_controls, textvariable=self.radar_valid, foreground=MUTED).pack(side="left", padx=8)
 
     def _submit(self, key, operation, callback):
         if key in self.pending or self.closed:
@@ -146,6 +182,15 @@ class App:
                 self.status.set(f"Updated {key} · {datetime.now(timezone.utc):%H:%M UTC}")
             except Exception as exc:
                 self.status.set(f"{key}: {exc}")
+                if key in ("radar", "site-radar", "satellite", "severe", "model"):
+                    image_key = "radar" if key == "site-radar" else key
+                    getattr(self, image_key + "_image").configure(image="", text=str(exc))
+                    self.images.pop(image_key, None)
+                    getattr(self, image_key + "_stamp").set("No current image available")
+                elif key in ("alerts", "alert-count"):
+                    self.alert_summary.set("NWS alerts unavailable")
+                    if key == "alerts":
+                        self._set_details("NWS alerts unavailable. Check weather.gov directly.")
         self.root.after(100, self._drain)
 
     def refresh(self):
@@ -153,17 +198,64 @@ class App:
         if tab == 0:
             self._submit("observations", data.metars, self._show_observations)
         elif tab == 1:
-            self._load_image("radar", data.RADAR_URL)
+            choice, site = self.radar_product.get(), self.radar_site.get()
+            if choice == "National reflectivity":
+                self.radar_valid.set("National composite · NOAA/NWS")
+                self._load_image("radar", data.RADAR_URL)
+            else:
+                self._submit("site-radar", lambda: radar.site_map(site, choice), lambda result: self._show_site_radar(site, choice, result))
         elif tab == 2:
             self._load_image("satellite", data.SATELLITE[self.satellite_choice.get()])
-        else:
+        elif tab == 3:
             choice = self.severe_choice.get()
             self._load_image("severe", data.MLCAPE_URL if choice == "Southern Plains MLCAPE" else data.OUTLOOK[choice])
+        else:
+            hours = int(self.model_hour.get())
+            self._submit("model", lambda: model.cape_map(hours), lambda result: self._show_model(hours, result))
+
+    def _show_site_radar(self, site, choice, result):
+        if site != self.radar_site.get() or choice != self.radar_product.get():
+            self.root.after(0, self.refresh)
+            return
+        picture, valid = result
+        self.radar_valid.set(f"{site.split(' · ')[0]} {choice} · {valid} · Iowa Environmental Mesonet")
+        self.radar_stamp.set(f"Radar scan valid {valid} · current within 15 minutes")
+        self.image_urls["radar"] = "site-radar"
+        self._show_image("radar", "site-radar", picture)
+
+    def _show_model(self, hours, result):
+        if hours != int(self.model_hour.get()):
+            self.root.after(0, self.refresh)
+            return
+        picture, valid = result
+        self.model_valid.set("Valid " + valid + " · GFS best time series")
+        self.model_stamp.set("Forecast valid " + valid + " · not an observation or warning")
+        self.image_urls["model"] = "gfs"
+        self._show_image("model", "gfs", picture)
 
     def _periodic(self):
         if not self.closed:
-            self.refresh()
-            self.root.after(300_000, self._periodic)
+            self.tick += 1
+            if self.tabs.index(self.tabs.select()) <= 2 or self.tick % 5 == 0:
+                self.refresh()
+            self._refresh_alert_count()
+            self.root.after(60_000, self._periodic)
+
+    def _refresh_alert_count(self):
+        state = self.state.get().strip().upper()
+        if len(state) == 2 and state.isascii() and state.isalpha():
+            self._submit("alert-count", lambda: (state, data.alerts(state)), self._show_alert_count)
+
+    def _show_alert_count(self, result):
+        state, items = result
+        if state != self.state.get().strip().upper():
+            return
+        self.alerts_snapshot = items
+        self.alert_summary.set(f"NWS {state} alerts: {len(items)}")
+
+    def _open_alerts(self):
+        self.tabs.select(self.observations_tab)
+        self.load_alerts()
 
     def _show_observations(self, rows):
         self.table.delete(*self.table.get_children())
@@ -205,6 +297,7 @@ class App:
         self._submit("alerts", lambda: data.alerts(self.state.get()), self._show_alerts)
 
     def _show_alerts(self, alerts):
+        self.alert_summary.set(f"NWS {self.state.get().strip().upper()} alerts: {len(alerts)}")
         if not alerts:
             self._set_details("No active NWS alerts returned for this state.")
         else:
@@ -213,13 +306,19 @@ class App:
     def _load_image(self, key, url):
         self.image_urls[key] = url
         def decode():
-            raw = data.image(url)
+            raw, updated = data.image_record(url)
             with Image.open(io.BytesIO(raw)) as opened:
                 opened.seek(0)
                 result = opened.convert("RGB")
                 result.thumbnail((960, 500), Image.Resampling.LANCZOS)
-                return result
-        self._submit(key, decode, lambda result: self._show_image(key, url, result))
+                return result, updated
+        self._submit(key, decode, lambda result: self._show_dated_image(key, url, result))
+
+    def _show_dated_image(self, key, url, result):
+        picture, updated = result
+        self._show_image(key, url, picture)
+        if self.image_urls.get(key) == url:
+            getattr(self, key + "_stamp").set(f"Source updated {updated:%d %b %Y %H:%M UTC} · current as of fetch")
 
     def _show_image(self, key, url, pil_image):
         if self.image_urls.get(key) != url:

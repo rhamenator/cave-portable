@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -48,9 +49,13 @@ class Observation:
 
 
 def _fetch(url: str, maximum: int, accept: str) -> bytes:
+    return _fetch_with_time(url, maximum, accept)[0]
+
+
+def _fetch_with_time(url: str, maximum: int, accept: str) -> tuple[bytes, datetime | None]:
     if not url.startswith("https://"):
         raise DataError("Only HTTPS weather sources are allowed")
-    request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
+    request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept, "Cache-Control": "no-cache", "Pragma": "no-cache"})
     try:
         with urlopen(request, timeout=12) as response:
             if response.status != 200:
@@ -58,7 +63,12 @@ def _fetch(url: str, maximum: int, accept: str) -> bytes:
             payload = response.read(maximum + 1)
             if len(payload) > maximum:
                 raise DataError("Weather response exceeded its size limit")
-            return payload
+            modified = response.headers.get("Last-Modified")
+            try:
+                updated = parsedate_to_datetime(modified).astimezone(timezone.utc) if modified else None
+            except (TypeError, ValueError):
+                updated = None
+            return payload, updated
     except (HTTPError, URLError, TimeoutError, OSError) as exc:
         raise DataError(f"Weather service unavailable: {exc}") from exc
 
@@ -127,9 +137,19 @@ def alerts(state: str) -> list[tuple[str, str, str]]:
 
 
 def image(url: str) -> bytes:
+    return image_record(url)[0]
+
+
+def image_record(url: str) -> tuple[bytes, datetime]:
     if url not in (RADAR_URL, MLCAPE_URL, *SATELLITE.values(), *OUTLOOK.values()):
         raise DataError("Unknown imagery source")
-    data = _fetch(url, MAX_IMAGE, "image/*")
+    data, updated = _fetch_with_time(url, MAX_IMAGE, "image/*")
     if not (data.startswith(b"GIF87a") or data.startswith(b"GIF89a") or data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n")):
         raise DataError("Weather service returned an unexpected image")
-    return data
+    if updated is None:
+        raise DataError("Imagery has no source update time; freshness cannot be verified")
+    age = (datetime.now(timezone.utc) - updated).total_seconds()
+    max_age = 15 * 60 if url == RADAR_URL else 30 * 60 if url in SATELLITE.values() else 120 * 60 if url == MLCAPE_URL else 30 * 3600
+    if age < -300 or age > max_age:
+        raise DataError(f"Imagery is stale (source updated {updated:%d %b %H:%M UTC})")
+    return data, updated
