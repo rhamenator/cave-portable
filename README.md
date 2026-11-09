@@ -2,7 +2,7 @@
 
 A lightweight, cross-platform weather viewer inspired by the needs of AWIPS CAVE users. This is an **independent companion**, not a fork or replacement for the full AWIPS CAVE workstation. It runs without an EDEX server and does not issue warnings or generate its own convective forecast.
 
-## What works in 0.1.1
+## What works in 0.1.2
 
 - National radar composite from NOAA/NWS, single-site reflectivity and storm-relative Doppler velocity from Iowa Environmental Mesonet, and GOES East/West GeoColor satellite imagery from NOAA/NESDIS.
 - Current METAR observations at 24 US airports, direct ICAO station lookup, raw METAR and TAF, and active NWS alerts by state.
@@ -16,7 +16,7 @@ The app is designed to start and remain responsive on machines below the [8 GB m
 
 ### Desktop bundles
 
-Tagged builds produce downloadable Windows, macOS Intel/Apple Silicon, and Linux archives on GitHub Releases. These bundles are currently **unsigned**. Extract the archive and launch `CAVE-Portable.exe`, `CAVE-Portable.app`, or `CAVE-Portable`. A signed installer and cross-distribution Linux package are planned. The Linux executable uses the build runner's glibc baseline and may not work on older distributions.
+Tagged builds produce downloadable Windows, macOS Intel/Apple Silicon, and Linux archives on GitHub Releases. These bundles are currently **unsigned**. On Linux, extract the archive and run `sh install-linux.sh` from its extracted folder to install for your user account with a weather icon and application-menu entry. Then launch **CAVE Portable** from the menu or run `~/.local/bin/cave-portable`. Windows and macOS users can extract and launch `CAVE-Portable.exe` or `CAVE-Portable.app`; those builds also carry the icon. A signed installer and cross-distribution Linux package are planned. The Linux executable uses the build runner's glibc baseline and may not work on older distributions.
 
 ### From source (Linux, Windows, macOS)
 

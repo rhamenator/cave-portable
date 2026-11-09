@@ -14,4 +14,6 @@ if sys.platform == "darwin":
 elif os.name == "nt":
     shutil.make_archive(str(target / name), "zip", "dist")
 else:
-    subprocess.run(["tar", "-C", "dist", "-czf", str(target / f"{name}.tar.gz"), "CAVE-Portable"], check=True)
+    shutil.copy2("src/cave_portable/assets/icon-256.png", "dist/cave-portable.png")
+    shutil.copy2("scripts/install_linux.sh", "dist/install-linux.sh")
+    subprocess.run(["tar", "-C", "dist", "-czf", str(target / f"{name}.tar.gz"), "CAVE-Portable", "cave-portable.png", "install-linux.sh"], check=True)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-11-09
+
+- Added a weather radar and storm icon to the window, desktop launcher, Windows executable, and macOS app.
+- Matched the Linux desktop launcher to the app window and present it above other windows at launch on GNOME Wayland until the user selects it.
+- Added a one-step per-user Linux installer to the release archive.
+
 ## 0.1.1 — 2026-11-09
 
 - Kept map legends, product controls, and source times visible when the desktop window is shorter.

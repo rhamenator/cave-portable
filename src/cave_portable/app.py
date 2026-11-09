@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import io
+import os
 import queue
 import sys
 import tkinter as tk
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from importlib.resources import files
 from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
@@ -31,6 +33,8 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(f"CAVE Portable {__version__}")
+        self._window_icon = tk.PhotoImage(file=str(files("cave_portable").joinpath("assets/icon-64.png")))
+        self.root.iconphoto(True, self._window_icon)
         self.root.geometry("1000x640")
         self.root.minsize(900, 600)
         self.root.configure(bg=BG)
@@ -108,6 +112,19 @@ class App:
         self.root.after(60_000, self._periodic)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.bind("<Configure>", self._schedule_image_resize)
+        self.root.after(80, self._present_window)
+
+    def _present_window(self):
+        self.root.deiconify()
+        self.root.lift()
+        if sys.platform.startswith("linux") and os.environ.get("XDG_SESSION_TYPE") == "wayland":
+            self.root.attributes("-topmost", True)
+            self.root.bind("<FocusIn>", self._release_presentation, add="+")
+
+    def _release_presentation(self, _event):
+        if not self.closed:
+            self.root.attributes("-topmost", False)
+            self.root.unbind("<FocusIn>")
 
     def _observations_ui(self):
         locality = ttk.Frame(self.observations_tab)
@@ -558,7 +575,7 @@ class App:
 def main():
     if sys.platform.startswith("linux") and not ("DISPLAY" in __import__("os").environ or "WAYLAND_DISPLAY" in __import__("os").environ):
         raise SystemExit("CAVE Portable needs a graphical desktop session")
-    root = tk.Tk()
+    root = tk.Tk(className="Caveportable")
     App(root)
     root.mainloop()
 
