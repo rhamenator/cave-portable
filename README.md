@@ -2,7 +2,7 @@
 
 A lightweight, cross-platform weather viewer inspired by the needs of AWIPS CAVE users. This is an **independent companion**, not a fork or replacement for the full AWIPS CAVE workstation. It runs without an EDEX server and does not issue warnings or generate its own convective forecast.
 
-## What works in 0.1.3
+## What works in 0.1.4
 
 - National radar composite from NOAA/NWS, single-site reflectivity and storm-relative Doppler velocity from Iowa Environmental Mesonet, and GOES East/West GeoColor satellite imagery from NOAA/NESDIS.
 - Current METAR observations at 24 US airports, direct ICAO station lookup, raw METAR and TAF, and active NWS alerts by state.
@@ -16,14 +16,14 @@ The app is designed to start and remain responsive on machines below the [8 GB m
 
 ### Desktop bundles
 
-Tagged builds produce downloadable Windows, macOS Intel/Apple Silicon, and Linux archives on GitHub Releases. These bundles are currently **unsigned**. On Linux, extract the archive and run `sh install-linux.sh` from its extracted folder to install for your user account with a weather icon and application-menu entry. Then launch **CAVE Portable** from the menu or run `~/.local/bin/cave-portable`. On GNOME Wayland systems that immediately minimize the Tk window, the app opens a frameless window with its own **Close** button; drag the header to move it. Windows and macOS users can extract and launch `CAVE-Portable.exe` or `CAVE-Portable.app`; those builds also carry the icon. A signed installer and cross-distribution Linux package are planned. The Linux executable uses the build runner's glibc baseline and may not work on older distributions.
+Tagged builds produce downloadable Windows, macOS Intel/Apple Silicon, and Linux archives on GitHub Releases. These bundles are currently **unsigned**. On Linux, extract the archive and run `sh install-linux.sh` from its extracted folder to install for your user account with a weather icon and application-menu entry. Then launch **CAVE Portable** from the menu or run `~/.local/bin/cave-portable`. Linux Wayland sessions use a native GTK 3 window; Linux X11, Windows, and macOS use Tk. The Linux bundle requires a GTK 3 runtime, which is already present on many desktops. Windows and macOS users can extract and launch `CAVE-Portable.exe` or `CAVE-Portable.app`; those builds also carry the icon. A signed installer and cross-distribution Linux package are planned. The Linux executable uses the build runner's glibc baseline and may not work on older distributions.
 
 ### From source (Linux, Windows, macOS)
 
-Install Python 3.10 or later, Tk, and Python's `venv` module. On Debian/Ubuntu, install `python3-tk` and `python3-venv`; on Fedora/RHEL, install `python3-tkinter`; on Arch, install `tk`. Tk and `venv` are included with standard Python installers on Windows and macOS. Then:
+Install Python 3.10 or later, Tk, and Python's `venv` module. Linux Wayland also needs GTK 3 and PyGObject. On Debian/Ubuntu, install `python3-tk`, `python3-venv`, `python3-gi`, and `gir1.2-gtk-3.0`; on Fedora/RHEL, install `python3-tkinter`, `python3-gobject`, and `gtk3`; on Arch, install `tk`, `python-gobject`, and `gtk3`. When using the distribution's PyGObject package, create the virtual environment with `python3 -m venv --system-site-packages .venv` so Python can import it. Tk and `venv` are included with standard Python installers on Windows and macOS. Then:
 
 ```sh
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
 python -m pip install .
 cave-portable

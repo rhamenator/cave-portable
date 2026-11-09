@@ -1,7 +1,14 @@
 # Changelog
 
+## 0.1.4 — 2026-11-09
+
+- Use a native GTK 3 window on Linux Wayland after user testing showed Tk windows remained minimized even when mapped and centered.
+- Keep the five weather views, local postal-area weather, and opt-in warning monitor in the Wayland interface.
+- Tested the native window on GNOME Wayland and the observation and radar layouts in a desktop smoke test.
+
 ## 0.1.3 — 2026-11-09
 
+- This tag was not released after user testing found the Tk window was still invisible on GNOME Wayland.
 - Point the Linux menu entry directly at the installed weather icon and show the icon in the app header.
 - Recover the window when GNOME Wayland immediately minimizes it; the fallback has a draggable header and Close button.
 
