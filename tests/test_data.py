@@ -38,9 +38,10 @@ class DataTests(unittest.TestCase):
             {"id": "a", "properties": {"status": "Actual", "severity": "Severe", "event": "Severe Thunderstorm Warning", "headline": "Warning", "description": "Details"}},
             {"id": "b", "properties": {"status": "Actual", "severity": "Minor", "event": "Advisory"}},
             {"id": "c", "properties": {"status": "Test", "severity": "Extreme", "event": "Test"}},
+            {"id": "d", "properties": {"status": "Actual", "severity": "Moderate", "event": "Tornado Watch"}},
         ]}).encode()
         alerts = data.point_alerts(42.23, -83.33)
-        self.assertEqual([item.identifier for item in alerts], ["a"])
+        self.assertEqual([(item.identifier, item.level) for item in alerts], [("a", "warning"), ("d", "watch")])
 
     @patch.object(data, "_json")
     def test_canadian_alerts_filter_warning_and_expiry(self, fetch):
@@ -50,8 +51,10 @@ class DataTests(unittest.TestCase):
             {"id": "a", "properties": {"alert_type": "warning", "status_en": "continued", "expiration_datetime": future, "alert_name_en": "Snowfall warning"}},
             {"id": "b", "properties": {"alert_type": "statement", "expiration_datetime": future}},
             {"id": "c", "properties": {"alert_type": "warning", "expiration_datetime": past}},
+            {"id": "d", "properties": {"alert_type": "watch", "expiration_datetime": future, "alert_name_en": "Thunderstorm watch"}},
         ]}
-        self.assertEqual([x.identifier for x in data.canadian_point_alerts(45.42, -75.70)], ["a"])
+        self.assertEqual([(x.identifier, x.level) for x in data.canadian_point_alerts(45.42, -75.70)],
+                         [("a", "warning"), ("d", "watch")])
 
     @patch.object(data, "_json")
     def test_local_weather_rejects_stale_and_selects_nearest(self, fetch):

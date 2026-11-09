@@ -2,10 +2,10 @@
 
 ## What this desktop app currently monitors
 
-- **United States:** severe or extreme, actual NWS alerts returned for the chosen geocoded point. The NWS API is a weather-service feed; it is not the full Emergency Alert System (EAS), Wireless Emergency Alerts (WEA), or FEMA IPAWS all-hazards feed.
-- **Canada:** active Environment and Climate Change Canada weather warnings intersecting a small box around the chosen geocoded point. This is an ECCC weather feed; it is not the full Alert Ready / National Public Alerting System (NPAS) feed.
+- **United States:** actual NWS weather warnings and watches returned for the chosen geocoded point. The NWS API is a weather-service feed; it is not the full Emergency Alert System (EAS), Wireless Emergency Alerts (WEA), or FEMA IPAWS all-hazards feed.
+- **Canada:** active Environment and Climate Change Canada weather warnings and watches intersecting a small box around the chosen geocoded point. This is an ECCC weather feed; it is not the full Alert Ready / National Public Alerting System (NPAS) feed.
 
-The app checks while it is open, once a minute, and uses the system bell and a message box for a newly seen warning. It does not transmit alerts, receive broadcast or cellular messages, use an official EAS or Alert Ready tone, or guarantee delivery. It never uses IP location. Postal centroids and address geocodes are approximate; a boundary-area warning may be missed or shown unexpectedly.
+The app checks while it is running, once a minute. A new warning uses the system bell and a message box; a new watch opens a message box without the bell. On Linux Wayland, an available system tray indicator shows a red badge for a warning and yellow for a watch, with warnings taking precedence. It does not transmit alerts, receive broadcast or cellular messages, use an official EAS or Alert Ready tone, or guarantee delivery. It never uses IP location. Postal centroids and address geocodes are approximate; a boundary-area warning may be missed or shown unexpectedly.
 
 ## Other hazards and AMBER alerts
 

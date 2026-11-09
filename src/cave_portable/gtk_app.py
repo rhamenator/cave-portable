@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 import io
+import tempfile
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from importlib.resources import files
 
 import gi
-from PIL import Image
+from PIL import Image, ImageDraw
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
-from . import __version__, data, location, model, preferences, radar
+try:
+    gi.require_version("AyatanaAppIndicator3", "0.1")
+    from gi.repository import AyatanaAppIndicator3
+except (ImportError, ValueError):
+    AyatanaAppIndicator3 = None
+
+from . import __version__, data, hrrr, location, model, preferences, radar
 
 
 def label(text: str) -> Gtk.Label:
@@ -61,8 +68,13 @@ class App:
         self.setting_postal = False
         self.monitor_seen: set[str] = set()
         self.mini: Gtk.Window | None = None
+        self.latest_local_weather: str | None = None
         self.saved = preferences.load()
+        self.radar_sites = dict(radar.SITES)
+        self.radar_zoom = 1
         self.open_mini_on_location = bool(self.saved.get("monitor_enabled"))
+        self.indicator = None
+        self.indicator_icons = None
 
         self.window = Gtk.Window(title=f"CAVE Portable {__version__}")
         self.window.set_default_size(1000, 680)
@@ -77,6 +89,7 @@ class App:
                      label("CAVE PORTABLE · NOAA / NWS / SPC"))
         header.pack_end(button("Refresh", self.refresh), False, False, 0)
         header.pack_end(button("Official warnings", self.open_official), False, False, 0)
+        header.pack_end(button("Minimize to tray", self.minimize_to_tray), False, False, 0)
         self.alert_button = button("NWS alerts", self.load_alerts)
         header.pack_end(self.alert_button, False, False, 0)
         outer.pack_start(header, False, False, 0)
@@ -88,13 +101,16 @@ class App:
         self.image_ui("satellite", "Satellite", "NOAA/NESDIS GOES GeoColor")
         self.image_ui("severe", "Severe outlook & CAPE", "SPC categorical outlooks and Southern Plains MLCAPE")
         self.image_ui("model", "Forecast CAPE", "GFS surface-based CAPE · NSF Unidata THREDDS / USGS map")
+        self.image_ui("hrrr", "HRRR storm forecast", "NCEP HRRR simulated reflectivity · forecast, not observed radar")
         self.tabs.connect("switch-page", lambda *_args: GLib.idle_add(self.refresh))
 
         self.status = label("Ready · For urgent decisions, use official warnings and local instructions")
         outer.pack_start(self.status, False, False, 0)
         self.window.show_all()
+        self.setup_indicator()
         GLib.timeout_add(200, self.refresh)
         GLib.timeout_add(500, self.refresh_alert_count)
+        GLib.timeout_add(900, self.load_radar_catalog)
         if self.saved.get("postal_code"):
             GLib.timeout_add(700, self.set_location)
         GLib.timeout_add_seconds(60, self.periodic)
@@ -126,7 +142,7 @@ class App:
         self.state.set_text("MI")
         page.pack_start(row(label("ICAO station:"), self.station, button("Load station", self.load_station),
                             label("US state alerts:"), self.state, button("Load alerts", self.load_alerts)), False, False, 0)
-        self.monitor = Gtk.CheckButton(label="Monitor official warnings at postal area")
+        self.monitor = Gtk.CheckButton(label="Monitor official warnings and watches at postal area")
         self.monitor.set_active(bool(self.saved.get("monitor_enabled") and self.saved.get("postal_code")))
         self.monitor.connect("toggled", self.toggle_monitor)
         self.autostart = Gtk.CheckButton(label="Start at login")
@@ -174,9 +190,12 @@ class App:
         page.pack_start(controls, False, False, 0)
         if key == "radar":
             self.radar_product = choice(("National reflectivity", *radar.PRODUCTS), "National reflectivity", self.refresh)
-            self.radar_site = choice(tuple(radar.SITES), "DTX · Detroit", self.refresh)
+            self.radar_site = choice(tuple(self.radar_sites), "DTX · Detroit", self.refresh)
             controls.pack_start(self.radar_product, False, False, 0)
             controls.pack_start(self.radar_site, False, False, 0)
+            controls.pack_start(label("Site zoom:"), False, False, 0)
+            for factor in (1, 2, 4):
+                controls.pack_start(button(f"{factor}×", lambda factor=factor: self.set_radar_zoom(factor)), False, False, 0)
         elif key == "satellite":
             self.satellite_choice = choice(tuple(data.SATELLITE), "GOES East", self.refresh)
             controls.pack_start(self.satellite_choice, False, False, 0)
@@ -184,10 +203,14 @@ class App:
             self.severe_choice = choice((*data.OUTLOOK, "Southern Plains MLCAPE"), "Day 1", self.refresh)
             controls.pack_start(self.severe_choice, False, False, 0)
             controls.pack_start(label("CAPE is instability, not a standalone severe forecast."), False, False, 0)
-        else:
+        elif key == "model":
             controls.pack_start(label("Hours after next 3-hour UTC slot:"), False, False, 0)
             self.model_hour = choice(tuple(str(hour) for hour in model.HOURS), "24", self.refresh)
             controls.pack_start(self.model_hour, False, False, 0)
+        else:
+            controls.pack_start(label("Hours after latest HRRR run:"), False, False, 0)
+            self.hrrr_hour = choice(tuple(str(hour) for hour in hrrr.HOURS), "6", self.refresh)
+            controls.pack_start(self.hrrr_hour, False, False, 0)
         stamp = label("Source time pending. Images show source-provided valid times and legends when present.")
         page.pack_start(stamp, False, False, 0)
         self.image_stamps[key] = stamp
@@ -217,6 +240,10 @@ class App:
                 self.point_status.set_text("Local warning feed unavailable; check the official service")
             elif key in ("location", "local-weather"):
                 self.point_status.set_text(f"Local weather unavailable: {exc}")
+                if key == "local-weather":
+                    self.latest_local_weather = None
+                    if self.mini:
+                        self.mini_label.set_text("Nearby observation unavailable. Check the official weather service.")
         return False
 
     def refresh(self):
@@ -229,10 +256,14 @@ class App:
                 self.load_image("radar", data.RADAR_URL)
             else:
                 site = self.radar_site.get_active_text()
-                token = f"{site}:{product}"
-                self.image_requests["radar"] = token
-                self.submit("site-radar", lambda: radar.site_map(site, product),
-                            lambda result: self.show_product("radar", token, result, "Iowa Environmental Mesonet radar scan"))
+                if not site:
+                    return False
+                token = f"{site}:{product}:{self.radar_zoom}"
+                self.begin_image_request("radar", token)
+                sites, zoom = self.radar_sites, self.radar_zoom
+                source = "NWS Level III hydrometeor scan" if product == "Hydrometeor class (hail indicator)" else "Iowa Mesonet radar scan"
+                self.submit("site-radar", lambda: radar.site_map(site, product, sites=sites, zoom=zoom),
+                            lambda result: self.show_product("radar", token, result, source))
         elif tab == 2:
             self.load_image("satellite", data.SATELLITE[self.satellite_choice.get_active_text()])
         elif tab == 3:
@@ -241,13 +272,41 @@ class App:
         elif tab == 4:
             hours = int(self.model_hour.get_active_text())
             token = f"GFS:{hours}"
-            self.image_requests["model"] = token
+            self.begin_image_request("model", token)
             self.submit("model", lambda: model.cape_map(hours),
                         lambda result: self.show_product("model", token, result, "GFS forecast valid"))
+        elif tab == 5:
+            hours = int(self.hrrr_hour.get_active_text())
+            token = f"HRRR:{hours}"
+            self.begin_image_request("hrrr", token)
+            self.submit("hrrr", lambda: hrrr.reflectivity(hours),
+                        lambda result: self.show_product("hrrr", token, result, "NCEP HRRR simulated reflectivity"))
         return False
 
+    def set_radar_zoom(self, factor: int):
+        self.radar_zoom = factor
+        if self.tabs.get_current_page() == 1:
+            self.refresh()
+
+    def load_radar_catalog(self):
+        self.submit("radar-catalog", radar.available_sites, self.accept_radar_catalog)
+        return False
+
+    def accept_radar_catalog(self, sites):
+        selected = self.radar_site.get_active_text()
+        selected_id = selected.split(" · ")[0] if selected else "DTX"
+        self.radar_sites = sites
+        self.radar_site.remove_all()
+        active = 0
+        for index, name in enumerate(sites):
+            self.radar_site.append_text(name)
+            if name.startswith(selected_id + " · "):
+                active = index
+        self.radar_site.set_active(active)
+        self.status.set_text(f"Loaded {len(sites)} NWS radar sites")
+
     def load_image(self, key: str, url: str):
-        self.image_requests[key] = url
+        self.begin_image_request(key, url)
         def fetch():
             raw, updated = data.image_record(url)
             with Image.open(io.BytesIO(raw)) as opened:
@@ -256,6 +315,12 @@ class App:
                 picture.thumbnail((960, 500), Image.Resampling.LANCZOS)
             return picture, updated
         self.submit(key, fetch, lambda result: self.show_product(key, url, result, "Source updated"))
+
+    def begin_image_request(self, key: str, token: str):
+        if self.image_requests.get(key) != token:
+            self.image_targets[key].clear()
+            self.image_stamps[key].set_text("Loading current source…")
+        self.image_requests[key] = token
 
     def show_product(self, key, token, result, prefix):
         if self.image_requests.get(key) != token:
@@ -367,20 +432,25 @@ class App:
         if (resolved.country, resolved.code, resolved.street) != (*current, self.street.get_text().strip()):
             return
         self.postal_location = resolved
+        self.latest_local_weather = None
         self.setting_postal = True
         self.postal.set_text(resolved.code)
         self.setting_postal = False
         self.point_status.set_text(resolved.label)
         self.save_preferences()
-        self.submit("local-weather", lambda: data.nearby_metar(resolved.lat, resolved.lon), self.show_weather)
+        self.submit("local-weather", lambda: (resolved, data.nearby_metar(resolved.lat, resolved.lon)), self.show_weather)
         self.refresh_point_alerts()
         if self.open_mini_on_location:
             self.open_mini_on_location = False
             self.show_mini()
 
-    def show_weather(self, observation):
+    def show_weather(self, result):
+        target, observation = result
+        if target != self.postal_location:
+            return
         temperature = f"{observation.temp_c:.1f} °C" if observation.temp_c is not None else "Temperature unavailable"
         text = f"{temperature} · {observation.conditions}\nNearby airport {observation.station} · {observation.observed}"
+        self.latest_local_weather = text
         self.point_status.set_text(text.replace("\n", " · "))
         if self.mini:
             self.mini_label.set_text(text)
@@ -400,10 +470,13 @@ class App:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_border_width(12)
         self.mini.add(box)
-        self.mini_label = label("Loading nearby airport weather…")
+        self.mini_label = label(self.latest_local_weather or "Loading nearby airport weather…")
         box.pack_start(self.mini_label, True, True, 0)
         box.pack_start(button("Open main view", self.window.present), False, False, 0)
         self.mini.show_all()
+        if self.latest_local_weather is None:
+            target = self.postal_location
+            self.submit("local-weather", lambda: (target, data.nearby_metar(target.lat, target.lon)), self.show_weather)
 
     def toggle_monitor(self, widget):
         if widget.get_active() and not self.postal_location:
@@ -415,6 +488,8 @@ class App:
         self.save_preferences()
         if widget.get_active():
             self.refresh_point_alerts()
+        else:
+            self.set_indicator_level("normal")
 
     def toggle_autostart(self, widget):
         if widget.get_active() and not self.postal_location:
@@ -437,18 +512,64 @@ class App:
         target, alerts = result
         if target != self.postal_location or not self.monitor.get_active():
             return
-        self.point_status.set_text(f"{target.code} centroid · {len(alerts)} official warning(s)")
+        warnings = [item for item in alerts if item.level == "warning"]
+        watches = [item for item in alerts if item.level == "watch"]
+        self.set_indicator_level("warning" if warnings else "watch" if watches else "normal")
+        self.point_status.set_text(f"{target.code} centroid · {len(warnings)} official warning(s), {len(watches)} watch(es)")
         fresh = [item for item in alerts if item.identifier not in self.monitor_seen]
         self.monitor_seen.update(item.identifier for item in alerts)
         if fresh:
-            Gdk.Display.get_default().beep()
+            if any(item.level == "warning" for item in fresh):
+                Gdk.Display.get_default().beep()
             text = "\n\n".join(f"{item.event}: {item.headline}\n{item.description[:500]}" for item in fresh[:3])
             dialog = Gtk.MessageDialog(transient_for=self.window, modal=True,
-                                       message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.OK,
-                                       text="New official weather warning near " + target.code)
-            dialog.format_secondary_text(text + "\n\nCheck official local guidance immediately.")
+                                       message_type=Gtk.MessageType.WARNING if any(item.level == "warning" for item in fresh) else Gtk.MessageType.INFO,
+                                       buttons=Gtk.ButtonsType.OK,
+                                       text="New official weather alert near " + target.code)
+            dialog.format_secondary_text(text + "\n\nCheck official local guidance.")
             dialog.run()
             dialog.destroy()
+
+    def setup_indicator(self):
+        if AyatanaAppIndicator3 is None:
+            return
+        try:
+            base = Image.open(str(files("cave_portable").joinpath("assets/icon-64.png"))).convert("RGBA")
+            self.indicator_icons = tempfile.TemporaryDirectory(prefix="cave-tray-")
+            paths = {}
+            for level, color in (("normal", None), ("watch", "#f5c542"), ("warning", "#da3030")):
+                icon = base.copy()
+                if color:
+                    draw = ImageDraw.Draw(icon)
+                    draw.ellipse((36, 36, 62, 62), fill=color, outline="white", width=2)
+                paths[level] = f"{self.indicator_icons.name}/{level}.png"
+                icon.save(paths[level])
+            self.tray_paths = paths
+            self.indicator = AyatanaAppIndicator3.Indicator.new(
+                "cave-portable", paths["normal"], AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS)
+            menu = Gtk.Menu()
+            for title, action in (("Show CAVE Portable", self.window.present),
+                                  ("Mini weather window", self.show_mini),
+                                  ("Official warnings", self.open_official), ("Quit", self.close)):
+                item = Gtk.MenuItem(label=title)
+                item.connect("activate", lambda _item, callback=action: callback())
+                menu.append(item)
+            menu.show_all()
+            self.indicator.set_menu(menu)
+            self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
+        except Exception as exc:
+            self.indicator = None
+            self.status.set_text(f"System tray unavailable: {exc}")
+
+    def set_indicator_level(self, level):
+        if self.indicator:
+            self.indicator.set_icon_full(self.tray_paths[level], f"CAVE Portable · {level}")
+
+    def minimize_to_tray(self):
+        if self.indicator:
+            self.window.hide()
+        else:
+            self.status.set_text("System tray is unavailable in this desktop session")
 
     def periodic(self):
         if self.closed:
@@ -458,12 +579,16 @@ class App:
         self.refresh_point_alerts()
         if self.postal_location:
             target = self.postal_location
-            self.submit("local-weather", lambda: data.nearby_metar(target.lat, target.lon), self.show_weather)
+            self.submit("local-weather", lambda: (target, data.nearby_metar(target.lat, target.lon)), self.show_weather)
         return True
 
     def close(self, *_args):
         self.closed = True
         self.pool.shutdown(wait=False, cancel_futures=True)
+        if self.indicator:
+            self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.PASSIVE)
+        if self.indicator_icons:
+            self.indicator_icons.cleanup()
         Gtk.main_quit()
 
 

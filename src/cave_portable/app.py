@@ -18,6 +18,7 @@ from PIL import Image, ImageTk
 from . import __version__
 from . import data
 from . import model
+from . import hrrr
 from . import radar
 from . import preferences
 from . import location
@@ -44,6 +45,8 @@ class App:
         self.images: dict[str, ImageTk.PhotoImage] = {}
         self.image_sources: dict[str, tuple[str, Image.Image]] = {}
         self.image_urls: dict[str, str] = {}
+        self.radar_sites = dict(radar.SITES)
+        self.radar_zoom = 1
         self.resize_job: str | None = None
         self.fallback_chrome = False
         self.drag_origin: tuple[int, int, int, int] | None = None
@@ -106,7 +109,8 @@ class App:
         self.satellite_tab = ttk.Frame(self.tabs, padding=10)
         self.severe_tab = ttk.Frame(self.tabs, padding=10)
         self.model_tab = ttk.Frame(self.tabs, padding=10)
-        for frame, title in ((self.observations_tab, "Observations"), (self.radar_tab, "Radar"), (self.satellite_tab, "Satellite"), (self.severe_tab, "Severe outlook & CAPE"), (self.model_tab, "Forecast CAPE")):
+        self.hrrr_tab = ttk.Frame(self.tabs, padding=10)
+        for frame, title in ((self.observations_tab, "Observations"), (self.radar_tab, "Radar"), (self.satellite_tab, "Satellite"), (self.severe_tab, "Severe outlook & CAPE"), (self.model_tab, "Forecast CAPE"), (self.hrrr_tab, "HRRR storm forecast")):
             self.tabs.add(frame, text=title)
         self.tabs.bind("<<NotebookTabChanged>>", lambda _e: self.refresh())
 
@@ -115,14 +119,17 @@ class App:
         self._image_ui(self.satellite_tab, "satellite", "NOAA/NESDIS GOES GeoColor · latest available image")
         self._image_ui(self.severe_tab, "severe", "SPC convective outlooks and Southern Plains MLCAPE analysis")
         self._image_ui(self.model_tab, "model", "GFS surface-based CAPE forecast · NSF Unidata THREDDS / USGS map")
+        self._image_ui(self.hrrr_tab, "hrrr", "NCEP HRRR simulated reflectivity · forecast, not observed radar")
         self._satellite_controls()
         self._severe_controls()
         self._model_controls()
+        self._hrrr_controls()
         self._radar_controls()
 
         self.root.after(100, self._drain)
         self.root.after(300, self.refresh)
         self.root.after(500, self._refresh_alert_count)
+        self.root.after(900, self._load_radar_catalog)
         if saved.get("postal_code"):
             self.root.after(700, self.set_location)
         self.tick = 0
@@ -190,7 +197,7 @@ class App:
 
         options = ttk.Frame(self.observations_tab)
         options.pack(fill="x", pady=(0, 8))
-        ttk.Checkbutton(options, text="Monitor official warnings at postal area", variable=self.monitor_enabled, command=self._toggle_monitor).pack(side="left")
+        ttk.Checkbutton(options, text="Monitor official warnings and watches at postal area", variable=self.monitor_enabled, command=self._toggle_monitor).pack(side="left")
         ttk.Button(options, text="Mini weather window", command=self._show_mini).pack(side="left", padx=8)
         self.autostart = tk.BooleanVar(value=preferences.is_autostart_enabled())
         ttk.Checkbutton(options, text="Start at login", variable=self.autostart, command=self._toggle_autostart).pack(side="left", padx=8)
@@ -245,15 +252,27 @@ class App:
         self.model_valid = tk.StringVar(value="Choose a forecast time; the GFS best time series may combine runs.")
         ttk.Label(self.model_controls, textvariable=self.model_valid, foreground=MUTED).pack(side="left", padx=12)
 
+    def _hrrr_controls(self):
+        ttk.Label(self.hrrr_controls, text="Hours after latest HRRR run:").pack(side="left", padx=6)
+        self.hrrr_hour = tk.StringVar(value="6")
+        picker = ttk.Combobox(self.hrrr_controls, textvariable=self.hrrr_hour,
+                              values=[str(hour) for hour in hrrr.HOURS], state="readonly", width=5)
+        picker.pack(side="left", padx=6)
+        picker.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
+
     def _radar_controls(self):
         self.radar_product = tk.StringVar(value="National reflectivity")
         product = ttk.Combobox(self.radar_controls, textvariable=self.radar_product, values=("National reflectivity", *radar.PRODUCTS), state="readonly", width=24)
         product.pack(side="left", padx=6)
         product.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
         self.radar_site = tk.StringVar(value="DTX · Detroit")
-        site = ttk.Combobox(self.radar_controls, textvariable=self.radar_site, values=tuple(radar.SITES), state="readonly", width=25)
+        site = ttk.Combobox(self.radar_controls, textvariable=self.radar_site, values=tuple(self.radar_sites), state="readonly", width=25)
+        self.radar_site_picker = site
         site.pack(side="left", padx=6)
         site.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
+        for factor in (1, 2, 4):
+            ttk.Button(self.radar_controls, text=f"{factor}×", width=3,
+                       command=lambda factor=factor: self._set_radar_zoom(factor)).pack(side="left", padx=2)
         self.radar_valid = tk.StringVar(value="National composite · NOAA/NWS")
         ttk.Label(self.radar_controls, textvariable=self.radar_valid, foreground=MUTED).pack(side="left", padx=8)
 
@@ -279,7 +298,7 @@ class App:
                 self.status.set(f"Updated {key} · {datetime.now(timezone.utc):%H:%M UTC}")
             except Exception as exc:
                 self.status.set(f"{key}: {exc}")
-                if key in ("radar", "site-radar", "satellite", "severe", "model"):
+                if key in ("radar", "site-radar", "satellite", "severe", "model", "hrrr"):
                     image_key = "radar" if key == "site-radar" else key
                     getattr(self, image_key + "_image").configure(image="", text=str(exc))
                     self.images.pop(image_key, None)
@@ -307,22 +326,52 @@ class App:
                 self.radar_valid.set("National composite · NOAA/NWS")
                 self._load_image("radar", data.RADAR_URL)
             else:
-                self._submit("site-radar", lambda: radar.site_map(site, choice), lambda result: self._show_site_radar(site, choice, result))
+                sites, zoom = self.radar_sites, self.radar_zoom
+                self._submit("site-radar", lambda: radar.site_map(site, choice, sites=sites, zoom=zoom),
+                             lambda result: self._show_site_radar(site, choice, zoom, result))
         elif tab == 2:
             self._load_image("satellite", data.SATELLITE[self.satellite_choice.get()])
         elif tab == 3:
             choice = self.severe_choice.get()
             self._load_image("severe", data.MLCAPE_URL if choice == "Southern Plains MLCAPE" else data.OUTLOOK[choice])
-        else:
+        elif tab == 4:
             hours = int(self.model_hour.get())
             self._submit("model", lambda: model.cape_map(hours), lambda result: self._show_model(hours, result))
 
-    def _show_site_radar(self, site, choice, result):
-        if site != self.radar_site.get() or choice != self.radar_product.get():
+        elif tab == 5:
+            hours = int(self.hrrr_hour.get())
+            self._submit("hrrr", lambda: hrrr.reflectivity(hours), lambda result: self._show_hrrr(hours, result))
+
+    def _set_radar_zoom(self, factor):
+        self.radar_zoom = factor
+        if self.tabs.index(self.tabs.select()) == 1:
+            self.refresh()
+
+    def _load_radar_catalog(self):
+        self._submit("radar-catalog", radar.available_sites, self._accept_radar_catalog)
+
+    def _accept_radar_catalog(self, sites):
+        selected = self.radar_site.get().split(" · ")[0]
+        self.radar_sites = sites
+        self.radar_site_picker.configure(values=tuple(sites))
+        self.radar_site.set(next((name for name in sites if name.startswith(selected + " · ")), next(iter(sites))))
+
+    def _show_hrrr(self, hours, result):
+        if hours != int(self.hrrr_hour.get()):
+            self.refresh()
+            return
+        picture, timing = result
+        self.hrrr_stamp.set(f"NCEP HRRR simulated reflectivity · {timing} · forecast")
+        self.image_urls["hrrr"] = "hrrr"
+        self._show_image("hrrr", "hrrr", picture)
+
+    def _show_site_radar(self, site, choice, zoom, result):
+        if site != self.radar_site.get() or choice != self.radar_product.get() or zoom != self.radar_zoom:
             self.root.after(0, self.refresh)
             return
         picture, valid = result
-        self.radar_valid.set(f"{site.split(' · ')[0]} {choice} · {valid} · Iowa Environmental Mesonet")
+        source = "NWS" if choice == "Hydrometeor class (hail indicator)" else "Iowa Environmental Mesonet"
+        self.radar_valid.set(f"{site.split(' · ')[0]} {choice} · {valid} · {source}")
         self.radar_stamp.set(f"Radar scan valid {valid} · current within 15 minutes")
         self.image_urls["radar"] = "site-radar"
         self._show_image("radar", "site-radar", picture)
@@ -586,13 +635,18 @@ class App:
             return
         area = self.postal_location.code if self.postal_location else "postal area"
         agency = "NWS" if self.postal_location and self.postal_location.country == "US" else "ECCC"
-        self.point_status.set(f"{area} centroid · {len(alerts)} {agency} warning(s)")
+        warning_count = sum(alert.level == "warning" for alert in alerts)
+        watch_count = sum(alert.level == "watch" for alert in alerts)
+        self.point_status.set(f"{area} centroid · {warning_count} {agency} warning(s), {watch_count} watch(es)")
         fresh = [alert for alert in alerts if alert.identifier not in self.monitor_seen]
         self.monitor_seen.update(alert.identifier for alert in alerts)
         if fresh:
-            self.root.bell()
+            if any(alert.level == "warning" for alert in fresh):
+                self.root.bell()
             summary = "\n\n".join(f"{alert.event}: {alert.headline}\n{alert.description[:500]}" for alert in fresh[:3])
-            messagebox.showwarning("New " + agency + " warning near " + area, summary + "\n\nCheck official local guidance immediately.", parent=self.root)
+            title = "New " + agency + " weather alert near " + area
+            show = messagebox.showwarning if any(alert.level == "warning" for alert in fresh) else messagebox.showinfo
+            show(title, summary + "\n\nCheck official local guidance.", parent=self.root)
 
     def close(self):
         self.closed = True

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 — 2026-11-09
+
+- Load the live NWS WSR-88D station catalog (159 sites in the verified response), with a small offline fallback, and add 1×/2×/4× radar site zoom.
+- Add NWS hydrometeor classification with a source scan time and legend. The hail class is qualitative and is not a hail-size estimate.
+- Compose NCEP HRRR simulated reflectivity forecast images over a USGS basemap. Label each image with model initialization, valid time, and forecast status.
+- Fix the mini window's local weather state after a completed or failed request.
+- Monitor NWS/ECCC weather watches as well as warnings. On Linux Wayland with AppIndicator support, show a yellow watch or red warning tray badge and offer Minimize to tray; only a new warning sounds the system bell.
+- Compare public upstream data, AWIPS EDEX, and a paid radar app in the source plan. Do not claim correlation coefficient or quantitative hail products until a live feed is verified.
+
 ## 0.1.4 — 2026-11-09
 
 - Use a native GTK 3 window on Linux Wayland after user testing showed Tk windows remained minimized even when mapped and centered.

@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from cave_portable import model, radar
+from cave_portable import hrrr, model, radar
 from cave_portable.data import DataError
 
 
@@ -13,8 +13,35 @@ class ForecastTests(unittest.TestCase):
         with self.assertRaises(DataError):
             model.valid_time(999, now)
 
+    @patch.object(hrrr.data, "_json")
+    @patch.object(hrrr.model, "_png")
+    def test_hrrr_rejects_mismatched_and_past_forecasts(self, png, fetch):
+        now = datetime(2026, 11, 9, 20, tzinfo=timezone.utc)
+        fetch.return_value = {"model_init_utc": "2026-11-09T18:00:00Z", "model_forecast_utc": "2026-11-09T22:00:00Z"}
+        with self.assertRaisesRegex(DataError, "did not match"):
+            hrrr.reflectivity(3, now)
+        fetch.return_value = {"model_init_utc": "2026-11-09T16:00:00Z", "model_forecast_utc": "2026-11-09T19:00:00Z"}
+        with self.assertRaisesRegex(DataError, "already past"):
+            hrrr.reflectivity(3, now)
+        png.assert_not_called()
+
 
 class RadarTests(unittest.TestCase):
+    @patch.object(radar, "_json")
+    def test_station_catalog_accepts_only_wsr88d(self, fetch):
+        fetch.return_value = {"features": [
+            {"properties": {"id": f"K{i:03d}", "name": f"Site {i}", "stationType": "WSR-88D"},
+             "geometry": {"coordinates": [-83.0, 42.0]}} for i in range(101)
+        ] + [{"properties": {"id": "XXXX", "name": "Other", "stationType": "TDWR"},
+              "geometry": {"coordinates": [-83.0, 42.0]}}]}
+        sites = radar.available_sites()
+        self.assertEqual(len(sites), 101)
+        self.assertNotIn("XXX · Other", sites)
+
+    def test_zoom_changes_viewport(self):
+        wide = [float(x) for x in radar._bbox("DTX · Detroit", zoom=1).split(",")]
+        close = [float(x) for x in radar._bbox("DTX · Detroit", zoom=4).split(",")]
+        self.assertAlmostEqual((wide[2] - wide[0]) / (close[2] - close[0]), 4, places=1)
     @patch.object(radar, "_json")
     @patch.object(radar, "_png")
     def test_stale_scan_is_rejected_before_loading_image(self, png, json_fetch):

@@ -60,6 +60,7 @@ class WeatherAlert:
     headline: str
     description: str
     severity: str
+    level: str = "warning"
 
 
 def _fetch(url: str, maximum: int, accept: str) -> bytes:
@@ -207,7 +208,9 @@ def point_alerts(lat: float, lon: float) -> list[WeatherAlert]:
         prop = feature.get("properties", {})
         if not isinstance(prop, dict):
             continue
-        if prop.get("severity") not in ("Severe", "Extreme") or prop.get("status") != "Actual":
+        event = str(prop.get("event") or "")
+        level = "warning" if event.endswith("Warning") else "watch" if event.endswith("Watch") else None
+        if level is None or prop.get("status") != "Actual":
             continue
         if prop.get("messageType") == "Cancel":
             continue
@@ -216,7 +219,8 @@ def point_alerts(lat: float, lon: float) -> list[WeatherAlert]:
             event=str(prop.get("event") or "Alert")[:100],
             headline=str(prop.get("headline") or "")[:300],
             description=str(prop.get("description") or "")[:3000],
-            severity=str(prop["severity"]),
+            severity=str(prop.get("severity") or "Unknown"),
+            level=level,
         ))
     return [item for item in result if item.identifier]
 
@@ -235,7 +239,8 @@ def canadian_point_alerts(lat: float, lon: float) -> list[WeatherAlert]:
         if not isinstance(feature, dict) or not isinstance(feature.get("properties"), dict):
             continue
         prop = feature["properties"]
-        if str(prop.get("alert_type") or "").lower() != "warning":
+        level = str(prop.get("alert_type") or "").lower()
+        if level not in ("warning", "watch"):
             continue
         if str(prop.get("status_en") or "").lower() in ("cancelled", "ended", "expired", "test"):
             continue
@@ -250,7 +255,7 @@ def canadian_point_alerts(lat: float, lon: float) -> list[WeatherAlert]:
             result.append(WeatherAlert(identifier, str(prop.get("alert_name_en") or "Weather warning")[:100],
                                        str(prop.get("feature_name_en") or prop.get("alert_name_en") or "")[:300],
                                        str(prop.get("alert_text_en") or "")[:3000],
-                                       str(prop.get("risk_colour_en") or "Warning")[:30]))
+                                       str(prop.get("risk_colour_en") or level.title())[:30], level))
     return result
 
 
