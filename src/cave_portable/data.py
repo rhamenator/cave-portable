@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-USER_AGENT = "CAVE-Portable/0.4.2 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.4.3 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",

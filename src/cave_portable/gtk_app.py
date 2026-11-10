@@ -373,9 +373,10 @@ class App:
                     self.submit("site-radar", lambda: mrms.swath_map(site, sites, zoom, center),
                                 lambda result: self.show_product("radar", token, result, ""))
                 elif product in level3.PRODUCTS:
-                    alert_point = self.guidance_point[1:3] if self.guidance_point[3] == "US" else None
+                    alert_point = self.guidance_point[1:3]
+                    include_us_alerts = self.guidance_point[3] == "US"
                     self.submit("site-radar", lambda: level3.field_map(site, product, sites, zoom, center, frame, boundaries, tilt,
-                                                                       alert_point),
+                                                                       alert_point, include_us_alerts),
                                 lambda result: self.show_level3(token, result))
                 else:
                     self.radar_field = None

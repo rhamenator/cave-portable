@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3 — 2026-11-10
+
+- Keep the saved Canadian location as the map's selected point while omitting US NWS point-warning polygons there. Canadian alerts remain in the separate ECCC local view; radar-map polygon integration remains future work.
+
 ## 0.4.2 — 2026-11-10
 
 - Match decoded Level III reflectivity, velocity, CC, ZDR, and KDP to one radar-volume timeline; reject missing or stale matching fields instead of mixing product-specific frame indices.

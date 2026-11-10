@@ -4,7 +4,7 @@ See the [native-code assessment](PORTING_ASSESSMENT.md) for measured performance
 
 ## Current release
 
-0.4.2 adds one-volume timeline matching for decoded Level III fields and labels current official overlays on the radar map. It includes the 0.4.1 airport pressure trend, GFS forecast ingredients, and research-only outlook replay. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
+0.4.3 adds one-volume timeline matching for decoded Level III fields and labels current official overlays on the radar map. It includes the 0.4.1 airport pressure trend, GFS forecast ingredients, and research-only outlook replay. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 The source branch also contains [NOAA observational replay](NOAA_REPLAY.md) tools for historical case studies. Locally generated severe-weather prediction remains a later research question.
 
