@@ -64,7 +64,7 @@ jobs:
           & ./dist/install-windows.ps1
           if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\CAVE Portable\CAVE-Portable.exe'))) { throw 'Installed executable missing' }
           if (-not (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\CAVE Portable.lnk'))) { throw 'Start Menu shortcut missing' }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: release-assets/*
