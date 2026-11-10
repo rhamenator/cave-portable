@@ -17,6 +17,13 @@ class UKTests(unittest.TestCase):
             with self.assertRaises(data.DataError):
                 location.validate_postal("UK", invalid)
 
+    def test_country_station_lists_and_matching(self):
+        self.assertIn("EGLL", data.stations_for_country("UK"))
+        self.assertIn("CYYZ", data.stations_for_country("CA"))
+        self.assertNotIn("KDTW", data.stations_for_country("UK"))
+        self.assertTrue(data.station_matches_country("EGLL", "UK"))
+        self.assertFalse(data.station_matches_country("KDTW", "UK"))
+
     @patch("cave_portable.location.data._json")
     def test_postcode_lookup_and_street_rejection(self, fetch):
         fetch.return_value = {"result": {"latitude": 51.5, "longitude": -.12,
