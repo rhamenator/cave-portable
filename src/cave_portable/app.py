@@ -61,6 +61,7 @@ class App:
         self.guidance_text = tk.StringVar(value="Loading local SPC outlook for KLAN…")
         self.forecast_text = tk.StringVar(value="Loading local NWS forecast…")
         self.hourly_text = tk.StringVar(value="Loading local NWS hourly forecast…")
+        self.winter_text = tk.StringVar(value="NWS snow, ice, and gust forecast loading…")
         self.local_current = tk.StringVar(value="Nearby observation loading…")
         self.station_trend_text = tk.StringVar(value="Selected airport trend loading…")
         self.local_alert_text = tk.StringVar(value="Local official warnings and watches loading…")
@@ -238,6 +239,8 @@ class App:
                   wraplength=880, justify="left").pack(anchor="w")
         ttk.Label(briefing, textvariable=self.hourly_text, foreground=MUTED,
                   wraplength=880, justify="left").pack(anchor="w")
+        ttk.Label(briefing, textvariable=self.winter_text, foreground=MUTED,
+                  wraplength=880, justify="left").pack(anchor="w")
         hail_row = ttk.Frame(briefing)
         hail_row.pack(fill="x")
         ttk.Button(hail_row, text="Check hail near point", command=self.check_hail).pack(side="left", padx=(0, 8))
@@ -410,6 +413,8 @@ class App:
                     self.forecast_text.set(f"Local NWS forecast unavailable: {exc}")
                 elif key == "hourly-forecast":
                     self.hourly_text.set(f"NWS hourly forecast unavailable: {exc}")
+                elif key == "winter-forecast":
+                    self.winter_text.set(f"NWS winter forecast grid unavailable: {exc}")
                 elif key == "mrms-hail":
                     self.hail_text.set(f"MRMS MESH hail estimate unavailable: {exc}")
                 elif key == "local-alert-summary":
@@ -492,6 +497,8 @@ class App:
                                    else "NWS point forecasts cover the contiguous US")
             self.hourly_text.set("Loading local NWS hourly forecast…" if country == "US"
                                  else "NWS hourly forecasts cover the contiguous US")
+            self.winter_text.set("Loading NWS snow, ice, and gust forecast…" if country == "US"
+                                 else "NWS winter forecast grid covers the contiguous US")
             self.hail_text.set("MRMS MESH hail estimate: select Check hail for this point")
             self.local_alert_text.set("Local official warnings and watches loading…")
             if self.tabs.index(self.tabs.select()) in (0, 3, 5):
@@ -512,6 +519,8 @@ class App:
             self._submit("point-forecast", lambda: (target, data.point_forecast(lat, lon)), self._show_nws_forecast)
         if "hourly" not in self.guidance_last_fetch or now - self.guidance_last_fetch["hourly"] >= timedelta(minutes=10):
             self._submit("hourly-forecast", lambda: (target, data.hourly_forecast(lat, lon)), self._show_hourly_forecast)
+        if "winter" not in self.guidance_last_fetch or now - self.guidance_last_fetch["winter"] >= timedelta(minutes=10):
+            self._submit("winter-forecast", lambda: (target, data.winter_forecast(lat, lon)), self._show_winter_forecast)
 
     def _refresh_station_trend(self):
         station = self._station_for_settings()
@@ -555,6 +564,14 @@ class App:
         self.guidance_last_fetch["hourly"] = datetime.now(timezone.utc)
         self.hourly_text.set(forecast)
 
+    def _show_winter_forecast(self, result):
+        target, forecast = result
+        if target != self.guidance_point:
+            self._refresh_guidance()
+            return
+        self.guidance_last_fetch["winter"] = datetime.now(timezone.utc)
+        self.winter_text.set(forecast)
+
     def check_hail(self):
         target = self.guidance_point
         place, lat, lon, country = target
@@ -585,9 +602,11 @@ class App:
         self.guidance_last_fetch["alerts"] = datetime.now(timezone.utc)
         warnings = [item for item in alerts if item.level == "warning"]
         watches = [item for item in alerts if item.level == "watch"]
-        summary = f"Official local alerts: {len(warnings)} warning(s), {len(watches)} watch(es)"
-        if warnings or watches:
-            summary += " · " + (warnings or watches)[0].headline[:130]
+        advisories = [item for item in alerts if item.level == "advisory"]
+        summary = (f"Official local alerts: {len(warnings)} warning(s), {len(watches)} watch(es), "
+                   f"{len(advisories)} advisories")
+        if warnings or watches or advisories:
+            summary += " · " + (warnings or watches or advisories)[0].headline[:130]
         self.local_alert_text.set(summary)
 
     def _set_radar_zoom(self, factor):
@@ -1015,8 +1034,11 @@ class App:
         agency = "NWS" if self.postal_location and self.postal_location.country == "US" else "ECCC"
         warning_count = sum(alert.level == "warning" for alert in alerts)
         watch_count = sum(alert.level == "watch" for alert in alerts)
-        self.point_status.set(f"{area} centroid · {warning_count} {agency} warning(s), {watch_count} watch(es)")
-        fresh = [alert for alert in alerts if alert.identifier not in self.monitor_seen]
+        advisory_count = sum(alert.level == "advisory" for alert in alerts)
+        self.point_status.set(f"{area} centroid · {warning_count} {agency} warning(s), "
+                              f"{watch_count} watch(es), {advisory_count} advisories")
+        fresh = [alert for alert in alerts if alert.level in ("warning", "watch")
+                 and alert.identifier not in self.monitor_seen]
         self.monitor_seen.update(alert.identifier for alert in alerts)
         if fresh:
             if any(alert.level == "warning" for alert in fresh):

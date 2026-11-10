@@ -1,6 +1,6 @@
 """CAVE Portable: independent, lightweight weather viewer."""
 
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
 
 def main():

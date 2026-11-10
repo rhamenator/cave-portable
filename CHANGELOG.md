@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.4 — 2026-11-10
+
+- Keep US alert polygons from the selected radar's state visible on the decoded map for Canadian locations near the border. Identify the state-only coverage and alerts that lack polygons; local Canadian ECCC alerts remain separate.
+- Include NWS advisories in the US local alert briefing without sounding or opening a new-alert dialog for them.
+- Add a source-timed NWS winter briefing with the largest forecast snow, ice, and gust interval in the next 48 hours. The values are forecast-period peaks, not storm totals.
+- Replay KDTX archived reflectivity and correlation scans immediately before the 3 September 2026 Detroit-to-Windsor tornado's reported Windsor start time. This checks data availability, not warning lead time or debris-detection skill.
+
 ## 0.4.3 — 2026-11-10
 
 - Keep the saved Canadian location as the map's selected point while omitting US NWS point-warning polygons there. Canadian alerts remain in the separate ECCC local view; radar-map polygon integration remains future work.

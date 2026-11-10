@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-USER_AGENT = "CAVE-Portable/0.4.3 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.4.4 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
@@ -311,6 +311,72 @@ def hourly_forecast(lat: float, lon: float) -> str:
     return f"Next hours · NWS updated {updated:%d %b %H:%M UTC}: " + " · ".join(lines)
 
 
+def _grid_peak(field: dict, now: datetime, hours: int = 48):
+    """Largest source forecast interval intersecting the window, not a total."""
+    if not isinstance(field, dict) or not isinstance(field.get("values"), list):
+        return None
+    choices = []
+    for entry in field["values"][:500]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("validTime"), str):
+            continue
+        try:
+            start_text, duration = entry["validTime"].split("/", 1)
+            start = datetime.fromisoformat(start_text.replace("Z", "+00:00")).astimezone(timezone.utc)
+        except (ValueError, TypeError):
+            continue
+        match = re.fullmatch(r"P(?:(\d+)D|T(\d+)H)", duration)
+        if match is None:
+            continue
+        span = timedelta(days=int(match[1])) if match[1] else timedelta(hours=int(match[2]))
+        end = start + span
+        value = entry.get("value")
+        if (span <= timedelta(0) or end <= now or start >= now + timedelta(hours=hours)
+                or not isinstance(value, (int, float)) or not math.isfinite(value)):
+            continue
+        choices.append((float(value), start, end))
+    return max(choices, key=lambda item: (item[0], item[1])) if choices else None
+
+
+def winter_forecast(lat: float, lon: float, now: datetime | None = None) -> str:
+    """Source-attributed snow, ice, and gust peaks in NWS forecast grid periods."""
+    if not (math.isfinite(lat) and math.isfinite(lon) and 24 <= lat <= 50 and -126 <= lon <= -66):
+        raise DataError("NWS winter forecast grid covers the contiguous US")
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    point = _json(f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}")
+    props = point.get("properties") if isinstance(point, dict) else None
+    url = props.get("forecastGridData") if isinstance(props, dict) else None
+    if not isinstance(url, str) or not re.fullmatch(r"https://api\.weather\.gov/gridpoints/[A-Z]{3}/\d+,\d+", url):
+        raise DataError("NWS forecast grid address was invalid")
+    grid = _json(url)
+    fields = grid.get("properties") if isinstance(grid, dict) else None
+    if not isinstance(fields, dict):
+        raise DataError("NWS forecast grid was invalid")
+    try:
+        updated = datetime.fromisoformat(str(fields["updateTime"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DataError("NWS forecast grid update time was unavailable") from exc
+    if updated > current + timedelta(minutes=5) or current - updated > timedelta(hours=18):
+        raise DataError("NWS forecast grid is stale")
+    specs = (("snowfallAmount", "snow", "wmoUnit:mm", 1 / 25.4, "in"),
+             ("iceAccumulation", "ice", "wmoUnit:mm", 1 / 25.4, "in"),
+             ("windGust", "gust", "wmoUnit:km_h-1", 0.621371, "mph"))
+    parts = []
+    for key, label, unit, factor, display_unit in specs:
+        field = fields.get(key)
+        if not isinstance(field, dict) or field.get("uom") != unit:
+            continue
+        peak = _grid_peak(field, current)
+        if peak is not None:
+            value, start, end = peak
+            precision = 1 if label != "gust" else 0
+            parts.append(f"{label} {value * factor:.{precision}f} {display_unit} "
+                         f"({start:%d %b %H:%M}–{end:%d %b %H:%M} UTC)")
+    if not parts:
+        raise DataError("NWS forecast grid lacked usable winter periods")
+    return (f"NWS winter ingredients, next 48 h · grid updated {updated:%d %b %H:%M UTC} · "
+            + "; ".join(parts) + " · largest forecast interval, not a 48 h total")
+
+
 def alerts(state: str) -> list[tuple[str, str, str]]:
     state = state.strip().upper()
     if not re.fullmatch(r"[A-Z]{2}", state):
@@ -339,7 +405,8 @@ def point_alerts(lat: float, lon: float) -> list[WeatherAlert]:
         if not isinstance(prop, dict):
             continue
         event = str(prop.get("event") or "")
-        level = "warning" if event.endswith("Warning") else "watch" if event.endswith("Watch") else None
+        level = ("warning" if event.endswith("Warning") else "watch" if event.endswith("Watch")
+                 else "advisory" if event.endswith("Advisory") else None)
         if level is None or prop.get("status") != "Actual":
             continue
         if prop.get("messageType") == "Cancel":

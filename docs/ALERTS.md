@@ -2,10 +2,12 @@
 
 ## What this desktop app currently monitors
 
-- **United States:** actual NWS weather warnings and watches returned for the chosen geocoded point. The NWS API is a weather-service feed; it is not the full Emergency Alert System (EAS), Wireless Emergency Alerts (WEA), or FEMA IPAWS all-hazards feed.
+- **United States:** actual NWS weather warnings and watches returned for the chosen geocoded point. Advisories appear in the local briefing without a sound or new-alert dialog. The NWS API is a weather-service feed; it is not the full Emergency Alert System (EAS), Wireless Emergency Alerts (WEA), or FEMA IPAWS all-hazards feed.
 - **Canada:** active Environment and Climate Change Canada weather warnings and watches intersecting a small box around the chosen geocoded point. This is an ECCC weather feed; it is not the full Alert Ready / National Public Alerting System (NPAS) feed.
 
 The app checks while it is running, once a minute. A new warning uses the system bell and a message box; a new watch opens a message box without the bell. On Linux Wayland, an available system tray indicator shows a red badge for a warning and yellow for a watch, with warnings taking precedence. It does not transmit alerts, receive broadcast or cellular messages, use an official EAS or Alert Ready tone, or guarantee delivery. It never uses IP location. Postal centroids and address geocodes are approximate; a boundary-area warning may be missed or shown unexpectedly.
+
+The decoded radar map separately requests current NWS alerts for the selected US radar's state, even when the saved point is in Canada. It draws available polygons that overlap the viewport and labels state-only coverage and alerts without polygons. It does not turn a Michigan alert into a Canadian local warning, and it does not yet map ECCC polygons or NWS zone boundaries.
 
 ## Other hazards and AMBER alerts
 

@@ -4,7 +4,7 @@ See the [native-code assessment](PORTING_ASSESSMENT.md) for measured performance
 
 ## Current release
 
-0.4.3 adds one-volume timeline matching for decoded Level III fields and labels current official overlays on the radar map. It includes the 0.4.1 airport pressure trend, GFS forecast ingredients, and research-only outlook replay. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
+0.4.4 adds one-volume timeline matching for decoded Level III fields, current official overlays with a US-state border-context layer, and a local US winter forecast-grid summary. It includes the 0.4.1 airport pressure trend, GFS forecast ingredients, and research-only outlook replay. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 The source branch also contains [NOAA observational replay](NOAA_REPLAY.md) tools for historical case studies. Locally generated severe-weather prediction remains a later research question.
 
@@ -20,5 +20,6 @@ The source branch's live radar workspace now anchors reflectivity, velocity, and
 6. Reproducible packaged installers and measured startup, memory, download, and idle CPU budgets on Ubuntu, Fedora, Windows, and macOS.
 7. Consider Europe only after verifying postal geocoding, current observation and radar sources, and authoritative warning feeds for each supported country.
 8. Add optional AMBER and other public-safety categories only after acquiring and validating live all-hazards sources. The current NWS and ECCC weather feeds do not represent all US EAS/WEA or Canadian Alert Ready messages. Keep AMBER desktop notifications off by default when implemented. A mobile app is a later possibility and is outside this desktop release.
+9. Winter-storm workspace: map ECCC alerts and NWS zone-based alerts that lack GeoJSON polygons, add Canadian snowfall/ice forecasts, distinguish rain/snow/ice using authoritative products, and validate forecast accumulations and warning timing against archived winter events. The current US grid readout shows the largest individual forecast period within 48 hours, not a storm total or a confidence range. The US border-context layer covers the selected radar's state only.
 
 Further model research can add explicit GFS/NAM/HRRR runs, shear, CIN, lapse rate, moisture, uncertainty, and source-attributed multi-field forecast images. Any automated severe-weather guidance must be validated against archived events and quiet days before presentation as a prediction.

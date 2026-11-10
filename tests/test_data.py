@@ -56,7 +56,29 @@ class DataTests(unittest.TestCase):
             {"id": "d", "properties": {"status": "Actual", "severity": "Moderate", "event": "Tornado Watch"}},
         ]}).encode()
         alerts = data.point_alerts(42.23, -83.33)
-        self.assertEqual([(item.identifier, item.level) for item in alerts], [("a", "warning"), ("d", "watch")])
+        self.assertEqual([(item.identifier, item.level) for item in alerts],
+                         [("a", "warning"), ("b", "advisory"), ("d", "watch")])
+
+    @patch.object(data, "_json")
+    def test_winter_grid_reports_period_peak_and_source_time(self, fetch):
+        now = datetime(2026, 11, 10, 6, 0, tzinfo=timezone.utc)
+        point = {"properties": {"forecastGridData": "https://api.weather.gov/gridpoints/GRR/78,41"}}
+        grid = {"properties": {
+            "updateTime": "2026-11-10T05:00:00+00:00",
+            "snowfallAmount": {"uom": "wmoUnit:mm", "values": [
+                {"validTime": "2026-11-10T06:00:00+00:00/PT6H", "value": 25.4},
+                {"validTime": "2026-11-10T12:00:00+00:00/PT6H", "value": 12.7}]},
+            "iceAccumulation": {"uom": "wmoUnit:mm", "values": [
+                {"validTime": "2026-11-10T06:00:00+00:00/PT6H", "value": 2.54}]},
+            "windGust": {"uom": "wmoUnit:km_h-1", "values": [
+                {"validTime": "2026-11-10T06:00:00+00:00/PT1H", "value": 64.3738}]},
+        }}
+        fetch.side_effect = [point, grid]
+        summary = data.winter_forecast(42.7761, -84.5997, now)
+        self.assertIn("snow 1.0 in", summary)
+        self.assertIn("ice 0.1 in", summary)
+        self.assertIn("gust 40 mph", summary)
+        self.assertIn("not a 48 h total", summary)
 
     @patch.object(data, "_json")
     def test_canadian_alerts_filter_warning_and_expiry(self, fetch):
