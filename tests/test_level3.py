@@ -27,7 +27,38 @@ def synthetic_cc():
     return b"SDUS83 KGRR 100000\r\r\nN0CGRR\r\r\n" + message + pdb + compressed
 
 
+def synthetic_digital(product="N0G", number=154, minimum=-64, increment=1):
+    packet = struct.pack(">HHHhhHH", 16, 0, 4, 0, 0, 1000, 1)
+    packet += struct.pack(">HHH", 4, 0, 3600) + bytes((0, 2, 3, 4))
+    block = struct.pack(">hhIH", -1, 1, 16 + len(packet), 1)
+    block += struct.pack(">hI", -1, len(packet)) + packet
+    compressed = bz2.compress(block)
+    pdb = bytearray(102)
+    struct.pack_into(">hii", pdb, 0, -1, 42894, -85545)
+    struct.pack_into(">h", pdb, 12, number)
+    struct.pack_into(">h", pdb, 40, 5)
+    struct.pack_into(">hh", pdb, 42, minimum * 10, increment * 10)
+    when = datetime(2026, 11, 10, tzinfo=timezone.utc)
+    julian = (when - datetime(1970, 1, 1, tzinfo=timezone.utc)).days + 1
+    message = struct.pack(">HHIIHHH", number, julian, 60, 120 + len(compressed), 369, 0, 3)
+    return b"SDUS83 KGRR 100000\r\r\n" + product.encode() + b"GRR\r\r\n" + message + pdb + compressed
+
+
 class Level3Tests(unittest.TestCase):
+    def test_digital_velocity_and_reflectivity_start_at_code_two(self):
+        for product, number, minimum in (("N0G", 154, -64), ("N2U", 99, -64), ("N0B", 153, -32)):
+            with self.subTest(product=product):
+                field = level3.decode(synthetic_digital(product, number, minimum), "GRR", product)
+                self.assertEqual(field._value(2), minimum)
+                self.assertEqual(field._value(3), minimum + 1)
+
+    def test_tilt_product_codes(self):
+        self.assertEqual(level3.product_for_tilt("Digital velocity", 0)[:2], ("N0G", 154))
+        self.assertEqual(level3.product_for_tilt("Digital velocity", 3)[:2], ("N3U", 99))
+        self.assertEqual(level3.product_for_tilt("Correlation coefficient (CC)", 2)[:2], ("N2C", 161))
+        with self.assertRaises(DataError):
+            level3.product_for_tilt("Digital velocity", 4)
+
     def test_decodes_numeric_cc_and_rejects_wrong_product(self):
         sample = synthetic_cc()
         field = level3.decode(sample, "GRR", "N0C")

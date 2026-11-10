@@ -25,13 +25,33 @@ from .model import HEIGHT, WIDTH, _basemap
 BUCKET = "https://unidata-nexrad-level3.s3.us-east-1.amazonaws.com/"
 PRODUCTS = {
     "Digital reflectivity": ("N0B", 153, "dBZ"),
+    "Digital velocity": ("N0G", 154, "m/s"),
     "Correlation coefficient (CC)": ("N0C", 161, "ρhv"),
     "Differential reflectivity (ZDR)": ("N0X", 159, "dB"),
     "Specific differential phase (KDP)": ("N0K", 163, "°/km"),
 }
+TILTS = (0, 1, 2, 3)
 MAX_FILE = 1_500_000
 MAX_BLOCK = 2_000_000
-KEY = re.compile(r"^(?P<site>[A-Z0-9]{3})_(?P<product>N0[BCKX])_(?P<time>\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2})$")
+KEY = re.compile(r"^(?P<site>[A-Z0-9]{3})_(?P<product>N[0-3][BCGKUX])_(?P<time>\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2})$")
+
+
+def product_for_tilt(name: str, tilt: int) -> tuple[str, int, str]:
+    if name not in PRODUCTS or tilt not in TILTS:
+        raise DataError("Unknown NEXRAD field or elevation")
+    code, number, unit = PRODUCTS[name]
+    if name == "Digital velocity":
+        return (f"N{tilt}G", 154, unit) if tilt < 2 else (f"N{tilt}U", 99, unit)
+    return f"N{tilt}{code[-1]}", number, unit
+
+
+def _product_number(product: str) -> int | None:
+    for name in PRODUCTS:
+        for tilt in TILTS:
+            code, number, _unit = product_for_tilt(name, tilt)
+            if code == product:
+                return number
+    return None
 
 
 def _u16(data: bytes, offset: int) -> int:
@@ -67,7 +87,7 @@ _day_keys = lru_cache(maxsize=24)(_day_keys)
 
 
 def recent_keys(site: str, product: str, now: datetime | None = None) -> list[str]:
-    if not re.fullmatch(r"[A-Z0-9]{3}", site) or product not in {x[0] for x in PRODUCTS.values()}:
+    if not re.fullmatch(r"[A-Z0-9]{3}", site) or _product_number(product) is None:
         raise DataError("Unknown NEXRAD site or product")
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     days = (current, current - timedelta(days=1)) if current.hour == 0 else (current,)
@@ -134,15 +154,14 @@ class Field:
         return self._value(code)
 
     def _value(self, code: int) -> float:
-        if self.product == "N0B":
-            return code * self.scale + self.offset
+        if self.product[-1] in "BGU":
+            return (code - 2) * self.scale + self.offset
         return (code - self.offset) / self.scale
 
 
 def decode(raw: bytes, site: str, product: str) -> Field:
     """Decode only validated digital radial products; reject unknown layouts."""
-    expected = next(((name, code) for name, (name_code, code, _unit) in PRODUCTS.items()
-                     if name_code == product), None)
+    expected = _product_number(product)
     if expected is None or not re.fullmatch(r"[A-Z0-9]{3}", site) or len(raw) > MAX_FILE:
         raise DataError("Unsupported NEXRAD radial product")
     first = raw.find(b"\r\r\n")
@@ -157,15 +176,15 @@ def decode(raw: bytes, site: str, product: str) -> Field:
         longitude = struct.unpack_from(">i", raw, pdb + 6)[0] / 1000
         product_code = _i16(raw, pdb + 12)
         elevation = _i16(raw, pdb + 40) / 10
-        threshold = 2 if product == "N0B" else _u16(raw, pdb + 54)
-        if product == "N0B":
-            scale = _u16(raw, pdb + 44) / 10
+        threshold = 2 if product[-1] in "BGU" else _u16(raw, pdb + 54)
+        if product[-1] in "BGU":
+            scale = _i16(raw, pdb + 44) / 10
             offset = _i16(raw, pdb + 42) / 10
         else:
             scale = struct.unpack_from(">f", raw, pdb + 42)[0]
             offset = struct.unpack_from(">f", raw, pdb + 46)[0]
         payload = raw[pdb + 102:]
-        if (code != expected[1] or product_code != expected[1] or length != len(raw) - start
+        if (code != expected or product_code != expected or length != len(raw) - start
                 or _i16(raw, pdb) != -1 or not (-90 <= latitude <= 90 and -180 <= longitude <= 180)
                 or not (0 < scale < 1000) or not math.isfinite(offset) or not (1 <= threshold <= 255)
                 or not payload.startswith(b"BZh")):
@@ -216,18 +235,25 @@ def fetch_field(site: str, product: str, frame: int = 0,
 
 
 def _color(product: str, value: float) -> tuple[int, int, int, int]:
-    if product == "N0C":
+    if product[-1] in "GU":
+        if value < -35: return 22, 110, 50, 220
+        if value < -3: return 86, 208, 169, 190
+        if value < 3: return 198, 202, 204, 165
+        if value < 15: return 242, 183, 88, 190
+        if value < 35: return 231, 104, 61, 210
+        return 180, 45, 66, 220
+    if product[-1] == "C":
         if value < 0.7: return 166, 34, 179, 220
         if value < 0.85: return 226, 54, 74, 220
         if value < 0.95: return 245, 189, 55, 210
         return 67, 184, 211, 160
-    if product == "N0B":
+    if product[-1] == "B":
         if value < 5: return 64, 140, 196, 150
         if value < 25: return 52, 184, 104, 180
         if value < 45: return 238, 201, 57, 210
         if value < 60: return 235, 87, 50, 220
         return 172, 54, 179, 230
-    if product == "N0X":
+    if product[-1] == "X":
         if value < 0: return 74, 113, 208, 210
         if value < 1: return 102, 213, 162, 180
         if value < 3: return 230, 209, 65, 210
@@ -283,16 +309,18 @@ def render(field: Field, bbox: str, reflectivity: Field | None = None) -> Image.
         draw.ellipse((site_x - 4, site_y - 4, site_x + 4, site_y + 4), fill="white", outline="black")
         draw.text((site_x + 7, site_y + 5), "K" + field.site, fill="black", stroke_width=2, stroke_fill="white")
     draw.rectangle((7, 7, 329, 57), fill=(15, 27, 41, 225))
-    title = next(name for name, (code, _number, _unit) in PRODUCTS.items() if code == field.product)
+    title = next(name for name in PRODUCTS if product_for_tilt(name, int(field.product[1]))[0] == field.product)
     draw.text((14, 11), f"K{field.site} {title} · {field.elevation:.1f}°", fill="white")
     draw.text((14, 32), f"Scan {field.time:%H:%M UTC} · NOAA Level III", fill="white")
     legends = {
+        "velocity": ((-45, "<-35 m/s"), (-25, "-35 to -15"), (-8, "-15 to -3"),
+                     (0, "near zero"), (8, "+3 to +15"), (25, "+15 to +35"), (45, ">+35")),
         "N0C": ((0.6, "<0.70"), (0.8, "0.70–0.85"), (0.9, "0.85–0.95"), (0.99, "≥0.95")),
         "N0B": ((0, "<5 dBZ"), (15, "5–25"), (35, "25–45"), (50, "45–60"), (65, "≥60")),
         "N0X": ((-1, "<0 dB"), (0.5, "0–1"), (2, "1–3"), (4, "≥3")),
         "N0K": ((-1, "<0 °/km"), (0.5, "0–1"), (2, "1–3"), (4, "≥3")),
     }
-    entries = legends[field.product]
+    entries = legends["velocity" if field.product[-1] in "GU" else "N0" + field.product[-1]]
     left = WIDTH - 176
     draw.rectangle((left - 7, 7, WIDTH - 7, 27 + 18 * len(entries)), fill=(15, 27, 41, 225))
     draw.text((left, 11), "Display palette", fill="white")
@@ -305,16 +333,16 @@ def render(field: Field, bbox: str, reflectivity: Field | None = None) -> Image.
 
 def field_map(site_name: str, product_name: str, sites: dict, zoom: int = 1,
               center: tuple[float, float] | None = None, frame: int = 0,
-              include_overlays: bool = True):
+              include_overlays: bool = True, tilt: int = 0):
     from .radar import _bbox
 
     if site_name not in sites or product_name not in PRODUCTS:
         raise DataError("Unknown radar site or product")
-    product, _code, unit = PRODUCTS[product_name]
+    product, _code, unit = product_for_tilt(product_name, tilt)
     field = fetch_field(sites[site_name][0], product, frame)
     reflectivity = None
-    if product != "N0B":
-        reflectivity = fetch_field(sites[site_name][0], "N0B", frame)
+    if product[-1] in "CXK":
+        reflectivity = fetch_field(sites[site_name][0], f"N{tilt}B", frame)
         if abs(field.time - reflectivity.time) > timedelta(minutes=5):
             raise DataError("Reflectivity and dual-pol scans did not match")
     bbox = _bbox(site_name, sites, zoom, center)

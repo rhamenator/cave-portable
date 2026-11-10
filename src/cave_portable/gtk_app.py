@@ -244,13 +244,16 @@ class App:
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         page.pack_start(controls, False, False, 0)
         if key == "radar":
-            self.radar_product = choice(("National reflectivity", *radar.PRODUCTS, *level3.PRODUCTS), "Digital reflectivity", self.refresh)
+            self.radar_product = choice(("National reflectivity", *radar.PRODUCTS, *level3.PRODUCTS,
+                                         "MRMS hail swath (30 min)"), "Digital reflectivity", self.refresh)
             self.radar_site = choice(tuple(self.radar_sites), "GRR · Grand Rapids", self.radar_site_changed)
             controls.pack_start(self.radar_product, False, False, 0)
             controls.pack_start(self.radar_site, False, False, 0)
             self.radar_timeline = choice(("Latest", "1 scan back", "2 scans back", "3 scans back", "4 scans back", "5 scans back"),
                                          "Latest", self.timeline_changed)
             controls.pack_start(self.radar_timeline, False, False, 0)
+            self.radar_tilt = choice(tuple(f"Tilt {tilt}" for tilt in level3.TILTS), "Tilt 0", self.refresh)
+            controls.pack_start(self.radar_tilt, False, False, 0)
             self.radar_boundaries = Gtk.CheckButton(label="Official boundaries")
             self.radar_boundaries.set_active(True)
             self.radar_boundaries.connect("toggled", lambda _widget: self.refresh())
@@ -353,11 +356,16 @@ class App:
                 center = self.radar_center
                 frame = self.radar_frame
                 boundaries = self.radar_boundaries.get_active()
-                token = f"{site}:{product}:{self.radar_zoom}:{center}:{frame}:{boundaries}"
+                tilt = self.radar_tilt.get_active()
+                token = f"{site}:{product}:{self.radar_zoom}:{center}:{frame}:{boundaries}:{tilt}"
                 self.begin_image_request("radar", token)
                 sites, zoom = self.radar_sites, self.radar_zoom
-                if product in level3.PRODUCTS:
-                    self.submit("site-radar", lambda: level3.field_map(site, product, sites, zoom, center, frame, boundaries),
+                if product == "MRMS hail swath (30 min)":
+                    self.radar_field = None
+                    self.submit("site-radar", lambda: mrms.swath_map(site, sites, zoom, center),
+                                lambda result: self.show_product("radar", token, result, ""))
+                elif product in level3.PRODUCTS:
+                    self.submit("site-radar", lambda: level3.field_map(site, product, sites, zoom, center, frame, boundaries, tilt),
                                 lambda result: self.show_level3(token, result))
                 else:
                     self.radar_field = None

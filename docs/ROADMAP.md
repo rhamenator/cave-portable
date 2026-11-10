@@ -4,11 +4,11 @@ See the [native-code assessment](PORTING_ASSESSMENT.md) for measured performance
 
 ## Current release
 
-0.3.2 adds decoded NOAA Level III digital reflectivity, CC, ZDR, and KDP, plus map inspection, pan/zoom, a short scan timeline, official SPC/NWS boundaries, on-demand NOAA MRMS MESH hail estimate at a selected CONUS point, explicit GFS run/field/lead selection for CAPE/CIN/humidity/dewpoint, and a local briefing. These were exercised in a running Linux GTK build. The app still lacks decoded Level II and velocity data, mapped hail swaths, multi-tilt analysis, EDEX integration, soundings, and independently validated severe-weather prediction. The older storm-relative velocity and hydrometeor products are upstream imagery.
+0.4.0 adds decoded Level III base Doppler velocity and selectable tilts 0–3 to reflectivity and dual-pol products, a mapped NOAA MRMS 30-minute MESH maximum, and GFS surface lifted index. The app still lacks decoded Level II data, EDEX integration, soundings, and independently validated severe-weather prediction. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 ## Next milestones
 
-1. Extend decoding to Level II and velocity data, additional tilts, and mapped hail estimates where sources supply them. Preserve site, tilt, scan time, units, legend, and freshness checks. Do not use stale archived products as live imagery. See [CAVE capability research](CAVE_RESEARCH.md).
+1. Extend decoding to Level II and add radar volume analysis and loop playback. Preserve site, tilt, scan time, units, legend, and freshness checks. Do not use stale archived products as live imagery. See [CAVE capability research](CAVE_RESEARCH.md).
 2. Interactive map with station, radar, satellite, and SPC polygon layers; pan/zoom and valid-time controls.
 3. Explicit model run selection, additional GFS/NAM/HRRR fields (shear, CIN, lapse rate, moisture), and uncertainty. Compose source-attributed multi-field forecast images. Avoid a severity score based on CAPE alone.
 4. Soundings and time series; probabilistic severe guidance with an explanation of SPC risk and hazard probabilities.

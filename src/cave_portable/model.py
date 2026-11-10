@@ -23,6 +23,7 @@ FIELDS = {
     "CIN": ("Convective_inhibition_surface", "-500,0", "J/kg", None),
     "2 m relative humidity": ("Relative_humidity_height_above_ground", "0,100", "%", "2"),
     "2 m dewpoint": ("Dewpoint_temperature_height_above_ground", "240,310", "K", "2"),
+    "Surface lifted index": ("Surface_Lifted_Index_surface", "-12,12", "K", None),
 }
 RUN_CHOICES = ("Latest run", "Previous run", "2 runs back", "3 runs back")
 RUN_PATH = re.compile(r"^grib/NCEP/GFS/Global_0p25deg/GFS_Global_0p25deg_(\d{8})_(\d{4})\.grib2$")

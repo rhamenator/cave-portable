@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 — 2026-11-09
+
+- Decode NOAA Level III base Doppler velocity and select elevation tilts 0–3 for decoded reflectivity and dual-pol fields. Correct digital radial value scaling at the first data code.
+- Map the current NOAA MRMS 30-minute MESH hail maximum with valid time and estimate-only legend; reject stale products.
+- Add GFS surface lifted index to the explicit-run forecast ingredient selector.
+- Replay the archived colleague station risk logic against airport observations before the 24 August 2023 Lansing-area and 7 May 2024 Portage tornadoes; document the limited result in the weather validation note.
+
 ## 0.3.2 — 2026-11-09
 
 - Use the bundled Adwaita GTK theme on Linux so text stays readable when another desktop theme needs an SVG loader absent from the bundle. Verified against the published 0.3.1 Linux archive in a clean desktop smoke test.

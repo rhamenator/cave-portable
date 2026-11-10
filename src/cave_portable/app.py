@@ -333,7 +333,8 @@ class App:
     def _radar_controls(self):
         self.radar_product = tk.StringVar(value="Digital reflectivity")
         product = ttk.Combobox(self.radar_controls, textvariable=self.radar_product,
-                               values=("National reflectivity", *radar.PRODUCTS, *level3.PRODUCTS), state="readonly", width=29)
+                               values=("National reflectivity", *radar.PRODUCTS, *level3.PRODUCTS,
+                                       "MRMS hail swath (30 min)"), state="readonly", width=29)
         product.pack(side="left", padx=6)
         product.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
         self.radar_site = tk.StringVar(value="GRR · Grand Rapids")
@@ -347,6 +348,12 @@ class App:
                                 state="readonly", width=13)
         timeline.pack(side="left", padx=4)
         timeline.bind("<<ComboboxSelected>>", lambda _e: self._radar_timeline_changed())
+        self.radar_tilt = tk.StringVar(value="Tilt 0")
+        tilt_picker = ttk.Combobox(self.radar_controls, textvariable=self.radar_tilt,
+                                   values=tuple(f"Tilt {tilt}" for tilt in level3.TILTS),
+                                   state="readonly", width=7)
+        tilt_picker.pack(side="left", padx=4)
+        tilt_picker.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
         self.radar_boundaries = tk.BooleanVar(value=True)
         ttk.Checkbutton(self.radar_controls, text="Official boundaries", variable=self.radar_boundaries,
                         command=self.refresh).pack(side="left", padx=3)
@@ -425,10 +432,15 @@ class App:
                 sites, zoom = self.radar_sites, self.radar_zoom
                 center = self.radar_center
                 frame = self.radar_frame
-                if choice in level3.PRODUCTS:
+                if choice == "MRMS hail swath (30 min)":
+                    self.radar_field = None
+                    self._submit("site-radar", lambda: mrms.swath_map(site, sites, zoom, center),
+                                 lambda result: self._show_swath(site, choice, zoom, center, result))
+                elif choice in level3.PRODUCTS:
                     boundaries = self.radar_boundaries.get()
-                    self._submit("site-radar", lambda: level3.field_map(site, choice, sites, zoom, center, frame, boundaries),
-                                 lambda result: self._show_level3(site, choice, zoom, center, frame, boundaries, result))
+                    tilt = int(self.radar_tilt.get().split()[-1])
+                    self._submit("site-radar", lambda: level3.field_map(site, choice, sites, zoom, center, frame, boundaries, tilt),
+                                 lambda result: self._show_level3(site, choice, zoom, center, frame, boundaries, tilt, result))
                 else:
                     self.radar_field = None
                     self._submit("site-radar", lambda: radar.site_map(site, choice, sites=sites, zoom=zoom, center=center),
@@ -566,17 +578,17 @@ class App:
         if self.tabs.index(self.tabs.select()) == 1:
             self.refresh()
 
-    def _show_level3(self, site, choice, zoom, center, frame, boundaries, result):
-        if (site, choice, zoom, center, frame, boundaries) != (self.radar_site.get(), self.radar_product.get(),
+    def _show_level3(self, site, choice, zoom, center, frame, boundaries, tilt, result):
+        if (site, choice, zoom, center, frame, boundaries, tilt) != (self.radar_site.get(), self.radar_product.get(),
                                                               self.radar_zoom, self.radar_center, self.radar_frame,
-                                                              self.radar_boundaries.get()):
+                                                              self.radar_boundaries.get(), int(self.radar_tilt.get().split()[-1])):
             self.root.after(0, self.refresh)
             return
         picture, stamp, field = result
         self.radar_field = field
         self.radar_valid.set(f"{site.split(' · ')[0]} {choice} · {stamp}")
         self.radar_stamp.set(f"{stamp} · click to inspect a value; drag to pan")
-        self.image_urls["radar"] = f"{site}:{choice}:{zoom}:{center}:{frame}:{boundaries}"
+        self.image_urls["radar"] = f"{site}:{choice}:{zoom}:{center}:{frame}:{boundaries}:{tilt}"
         self._show_image("radar", self.image_urls["radar"], picture)
 
     def _radar_press(self, event):
@@ -666,6 +678,18 @@ class App:
         self.radar_stamp.set(f"Radar scan valid {valid} · current within 15 minutes")
         self.image_urls["radar"] = "site-radar"
         self._show_image("radar", "site-radar", picture)
+
+    def _show_swath(self, site, choice, zoom, center, result):
+        if (site, choice, zoom, center) != (self.radar_site.get(), self.radar_product.get(),
+                                            self.radar_zoom, self.radar_center):
+            self.root.after(0, self.refresh)
+            return
+        picture, stamp = result
+        self.radar_valid.set(stamp)
+        self.radar_stamp.set(stamp + " · drag to pan")
+        token = f"{site}:{choice}:{zoom}:{center}:{stamp}"
+        self.image_urls["radar"] = token
+        self._show_image("radar", token, picture)
 
     def _show_model(self, hours, token, place, result):
         if hours != int(self.model_hour.get()) or token != self.model_request_token:
