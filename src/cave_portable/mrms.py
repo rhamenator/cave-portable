@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 from PIL import Image, ImageDraw
 
 from .data import DataError, _fetch
+from . import units
 
 BUCKET = "https://noaa-mrms-pds.s3.us-east-1.amazonaws.com/"
 PREFIX = "CONUS/MESH_00.50/"
@@ -111,7 +112,8 @@ def _swath_rgba(compressed: bytes, bbox: str) -> bytes:
 
 
 def swath_map(site_name: str, sites: dict, zoom: int = 1,
-              center: tuple[float, float] | None = None, now: datetime | None = None):
+              center: tuple[float, float] | None = None, now: datetime | None = None,
+              unit_mode: str = units.DEFAULT):
     from .model import WIDTH, HEIGHT, _basemap
     from .radar import _bbox
     if site_name not in sites:
@@ -141,8 +143,8 @@ def swath_map(site_name: str, sites: dict, zoom: int = 1,
         draw.rectangle((8, 73, 325, 97), fill=(15, 27, 41, 225))
         draw.text((15, 78), "No positive hail estimate in this view", fill="white")
     draw.rectangle((8, HEIGHT - 33, 401, HEIGHT - 6), fill=(15, 27, 41, 225))
-    for i, (color, label) in enumerate((("#ffdd35", "<1 in"), ("#f47830", "1–2 in"),
-                                         ("#d23150", "2–3 in"), ("#9339b1", "≥3 in"))):
+    labels = ("<2.5 cm", "2.5–5 cm", "5–7.5 cm", "≥7.5 cm") if unit_mode == "Metric" else ("<1 in", "1–2 in", "2–3 in", "≥3 in")
+    for i, (color, label) in enumerate(zip(("#ffdd35", "#f47830", "#d23150", "#9339b1"), labels)):
         x = 15 + i * 95
         draw.rectangle((x, HEIGHT - 26, x + 15, HEIGHT - 12), fill=color)
         draw.text((x + 19, HEIGHT - 26), label, fill="white", stroke_width=2, stroke_fill="black")
@@ -204,15 +206,15 @@ class HailReadout:
     point_mm: float | None
     nearby_max_mm: float | None
 
-    def summary(self, place: str) -> str:
+    def summary(self, place: str, unit_mode: str = units.DEFAULT) -> str:
         if self.point_mm is None:
             point = "no valid MESH estimate at the point"
         else:
-            point = f"{self.point_mm:.1f} mm ({self.point_mm / 25.4:.2f} in) at the point"
+            point = f"{units.ice(self.point_mm, unit_mode)} at the point"
         if self.nearby_max_mm is None:
             nearby = "no valid nearby estimate"
         else:
-            nearby = f"nearby sampled maximum {self.nearby_max_mm:.1f} mm ({self.nearby_max_mm / 25.4:.2f} in)"
+            nearby = f"nearby sampled maximum {units.ice(self.nearby_max_mm, unit_mode)}"
         return (f"NOAA MRMS MESH near {place}: {point}; {nearby}. "
                 f"Valid {self.time:%d %b %Y %H:%M UTC}. Algorithmic hail estimate, not a measured stone size or forecast.")
 

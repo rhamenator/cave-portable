@@ -12,6 +12,7 @@ import tempfile
 
 from .data import DataError, validate_station
 from .location import validate_postal
+from . import units
 
 
 def settings_path() -> pathlib.Path:
@@ -39,6 +40,7 @@ def load() -> dict:
         return {"station": validate_station(str(obj.get("station", "KDTW"))),
                 "country": country, "postal_code": postal,
                 "street": str(obj.get("street", ""))[:120],
+                "units": units.validate(str(obj.get("units", units.DEFAULT))),
                 "monitor_enabled": obj.get("monitor_enabled") is True and bool(postal)}
     except (OSError, ValueError, DataError):
         return {}
@@ -52,10 +54,11 @@ def save(settings: dict) -> None:
     if postal:
         country, postal = validate_postal(country, postal)
     payload = json.dumps({
-        "station": validate_station(settings["station"]),
+        "station": validate_station(str(settings.get("station", "KDTW"))),
         "country": country,
         "postal_code": postal,
         "street": str(settings.get("street", "")).strip()[:120],
+        "units": units.validate(str(settings.get("units", units.DEFAULT))),
         "monitor_enabled": settings.get("monitor_enabled") is True and bool(postal),
     }, indent=2) + "\n"
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=".settings-", text=True)

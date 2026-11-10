@@ -12,7 +12,11 @@ class PreferencesTests(unittest.TestCase):
             path = pathlib.Path(folder) / "settings.json"
             with patch.object(preferences, "settings_path", return_value=path):
                 preferences.save({"station": "kdtw", "country": "US", "postal_code": "48201", "monitor_enabled": True})
-                self.assertEqual(preferences.load(), {"station": "KDTW", "country": "US", "postal_code": "48201", "street": "", "monitor_enabled": True})
+                self.assertEqual(preferences.load(), {"station": "KDTW", "country": "US", "postal_code": "48201", "street": "", "units": "Hybrid", "monitor_enabled": True})
+                saved = preferences.load()
+                saved["units"] = "Metric"
+                preferences.save(saved)
+                self.assertEqual(preferences.load()["units"], "Metric")
 
     def test_linux_autostart_is_opt_in_and_reversible(self):
         with tempfile.TemporaryDirectory() as folder:

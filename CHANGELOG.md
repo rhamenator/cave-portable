@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6 — 2026-11-10
+
+- Add a saved US, Metric, or Hybrid unit selector to both desktop interfaces. Convert app-generated temperature, wind, visibility, pressure-trend, winter, and hail values; request NWS forecast text in US or SI units.
+- Refresh local weather and forecast readouts when the unit choice changes. Keep raw official messages, ECCC city wording, scientific radar/model units, and upstream images in their source units.
+- Correct the Canadian forecast refresh so it uses the selected location when loading its ECCC city forecast.
+
 ## 0.4.5 — 2026-11-10
 
 - Map NWS winter and other zone-based alerts using NOAA's public forecast-zone boundaries when the alert has no polygon. Keep any remaining unmapped alerts visible in the status.

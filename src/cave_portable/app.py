@@ -25,6 +25,7 @@ from . import level3
 from . import spc
 from . import preferences
 from . import location
+from . import units
 
 BG = "#101923"
 FG = "#eef4f7"
@@ -74,6 +75,7 @@ class App:
         self.country = tk.StringVar(value=saved.get("country", "US"))
         self.postal_code = tk.StringVar(value=saved.get("postal_code", ""))
         self.street = tk.StringVar(value=saved.get("street", ""))
+        self.unit_mode = tk.StringVar(value=saved.get("units", units.DEFAULT))
         self.postal_location: location.PostalLocation | None = None
         self.monitor_enabled = tk.BooleanVar(value=saved.get("monitor_enabled", False) and bool(saved.get("postal_code")))
         self.open_mini_on_location = self.monitor_enabled.get()
@@ -81,6 +83,7 @@ class App:
         self.monitor_seen: set[str] = set()
         self.mini_window: tk.Toplevel | None = None
         self.mini_weather = tk.StringVar(value="Set a ZIP or postal code to load local weather")
+        self.local_observation: data.Observation | None = None
         self.point_status = tk.StringVar(value="Set a ZIP or postal code for local weather and alerts")
 
         style = ttk.Style()
@@ -225,6 +228,10 @@ class App:
         ttk.Button(options, text="Mini weather window", command=self._show_mini).pack(side="left", padx=8)
         self.autostart = tk.BooleanVar(value=preferences.is_autostart_enabled())
         ttk.Checkbutton(options, text="Start at login", variable=self.autostart, command=self._toggle_autostart).pack(side="left", padx=8)
+        ttk.Label(options, text="Units:").pack(side="left", padx=(12, 3))
+        unit_picker = ttk.Combobox(options, textvariable=self.unit_mode, values=units.MODES, state="readonly", width=8)
+        unit_picker.pack(side="left")
+        unit_picker.bind("<<ComboboxSelected>>", self._units_changed)
         ttk.Label(self.observations_tab, textvariable=self.point_status, foreground=MUTED).pack(fill="x", pady=(0, 8))
         briefing = ttk.LabelFrame(self.observations_tab, text="Selected location briefing · official sources", padding=6)
         briefing.pack(fill="x", pady=(0, 6))
@@ -251,7 +258,7 @@ class App:
         table_frame = ttk.Frame(self.observations_tab)
         table_frame.pack(fill="both", expand=True)
         self.table = ttk.Treeview(table_frame, columns=columns, show="headings", height=4)
-        for key, title, width in (("station", "ICAO", 65), ("name", "Location", 220), ("time", "Observed", 140), ("temp", "°C", 55), ("wind", "Wind", 100), ("visibility", "Vis. mi", 70), ("category", "Flight", 70)):
+        for key, title, width in (("station", "ICAO", 65), ("name", "Location", 220), ("time", "Observed", 140), ("temp", "Temp", 75), ("wind", "Wind", 120), ("visibility", "Vis.", 70), ("category", "Flight", 70)):
             self.table.heading(key, text=title)
             self.table.column(key, width=width, minwidth=45, stretch=key == "name")
         self.table.pack(side="left", fill="both", expand=True)
@@ -446,16 +453,18 @@ class App:
                 frame = self.radar_frame
                 if choice == "MRMS hail swath (30 min)":
                     self.radar_field = None
-                    self._submit("site-radar", lambda: mrms.swath_map(site, sites, zoom, center),
-                                 lambda result: self._show_swath(site, choice, zoom, center, result))
+                    mode = self.unit_mode.get()
+                    self._submit("site-radar", lambda: mrms.swath_map(site, sites, zoom, center, unit_mode=mode),
+                                 lambda result: self._show_swath(site, choice, zoom, center, mode, result))
                 elif choice in level3.PRODUCTS:
                     boundaries = self.radar_boundaries.get()
                     tilt = int(self.radar_tilt.get().split()[-1])
                     alert_point = self.guidance_point[1:3]
                     include_us_alerts = self.guidance_point[3] == "US"
+                    mode = self.unit_mode.get()
                     self._submit("site-radar", lambda: level3.field_map(site, choice, sites, zoom, center, frame, boundaries, tilt,
-                                                                        alert_point, include_us_alerts),
-                                 lambda result: self._show_level3(site, choice, zoom, center, frame, boundaries, tilt, result))
+                                                                        alert_point, include_us_alerts, mode),
+                                 lambda result: self._show_level3(site, choice, zoom, center, frame, boundaries, tilt, mode, result))
                 else:
                     self.radar_field = None
                     self._submit("site-radar", lambda: radar.site_map(site, choice, sites=sites, zoom=zoom, center=center),
@@ -508,23 +517,28 @@ class App:
 
     def _refresh_guidance(self):
         place, lat, lon, country = self.guidance_point
+        target = self.guidance_point
         self._refresh_local_alert_summary()
         if country != "US":
             now = datetime.now(timezone.utc)
             if (country == "CA" and ("winter" not in self.guidance_last_fetch
                     or now - self.guidance_last_fetch["winter"] >= timedelta(minutes=10))):
-                self._submit("winter-forecast", lambda: (target, data.canadian_winter_forecast(lat, lon)), self._show_winter_forecast)
+                mode = self.unit_mode.get()
+                self._submit("winter-forecast", lambda: (target, mode, data.canadian_winter_forecast(lat, lon)), self._show_winter_forecast)
             return
         target = self.guidance_point
         now = datetime.now(timezone.utc)
         if "spc" not in self.guidance_last_fetch or now - self.guidance_last_fetch["spc"] >= timedelta(minutes=10):
             self._submit("spc-guidance", lambda: (target, spc.point_guidance(lat, lon).summary(place)), self._show_spc_guidance)
         if "nws" not in self.guidance_last_fetch or now - self.guidance_last_fetch["nws"] >= timedelta(minutes=10):
-            self._submit("point-forecast", lambda: (target, data.point_forecast(lat, lon)), self._show_nws_forecast)
+            mode = self.unit_mode.get()
+            self._submit("point-forecast", lambda: (target, mode, data.point_forecast(lat, lon, mode)), self._show_nws_forecast)
         if "hourly" not in self.guidance_last_fetch or now - self.guidance_last_fetch["hourly"] >= timedelta(minutes=10):
-            self._submit("hourly-forecast", lambda: (target, data.hourly_forecast(lat, lon)), self._show_hourly_forecast)
+            mode = self.unit_mode.get()
+            self._submit("hourly-forecast", lambda: (target, mode, data.hourly_forecast(lat, lon, mode)), self._show_hourly_forecast)
         if "winter" not in self.guidance_last_fetch or now - self.guidance_last_fetch["winter"] >= timedelta(minutes=10):
-            self._submit("winter-forecast", lambda: (target, data.winter_forecast(lat, lon)), self._show_winter_forecast)
+            mode = self.unit_mode.get()
+            self._submit("winter-forecast", lambda: (target, mode, data.winter_forecast(lat, lon, mode=mode)), self._show_winter_forecast)
 
     def _refresh_station_trend(self):
         station = self._station_for_settings()
@@ -542,7 +556,7 @@ class App:
             return
         self.station_trend_station = station
         self.guidance_last_fetch["station-trend"] = datetime.now(timezone.utc)
-        self.station_trend_text.set(trend.summary())
+        self.station_trend_text.set(trend.summary(self.unit_mode.get()))
 
     def _show_spc_guidance(self, result):
         target, outlook = result
@@ -553,24 +567,24 @@ class App:
         self.guidance_text.set(outlook)
 
     def _show_nws_forecast(self, result):
-        target, forecast = result
-        if target != self.guidance_point:
+        target, mode, forecast = result
+        if target != self.guidance_point or mode != self.unit_mode.get():
             self._refresh_guidance()
             return
         self.guidance_last_fetch["nws"] = datetime.now(timezone.utc)
         self.forecast_text.set(forecast)
 
     def _show_hourly_forecast(self, result):
-        target, forecast = result
-        if target != self.guidance_point:
+        target, mode, forecast = result
+        if target != self.guidance_point or mode != self.unit_mode.get():
             self._refresh_guidance()
             return
         self.guidance_last_fetch["hourly"] = datetime.now(timezone.utc)
         self.hourly_text.set(forecast)
 
     def _show_winter_forecast(self, result):
-        target, forecast = result
-        if target != self.guidance_point:
+        target, mode, forecast = result
+        if target != self.guidance_point or mode != self.unit_mode.get():
             self._refresh_guidance()
             return
         self.guidance_last_fetch["winter"] = datetime.now(timezone.utc)
@@ -583,11 +597,12 @@ class App:
             self.hail_text.set("MRMS MESH currently covers the contiguous US")
             return
         self.hail_text.set("Loading current NOAA MRMS MESH hail estimate…")
-        self._submit("mrms-hail", lambda: (target, mrms.near_point(lat, lon).summary(place)), self._show_hail)
+        mode = self.unit_mode.get()
+        self._submit("mrms-hail", lambda: (target, mode, mrms.near_point(lat, lon).summary(place, mode)), self._show_hail)
 
     def _show_hail(self, result):
-        target, summary = result
-        if target == self.guidance_point:
+        target, mode, summary = result
+        if target == self.guidance_point and mode == self.unit_mode.get():
             self.hail_text.set(summary)
 
     def _refresh_local_alert_summary(self):
@@ -629,10 +644,10 @@ class App:
         if self.tabs.index(self.tabs.select()) == 1:
             self.refresh()
 
-    def _show_level3(self, site, choice, zoom, center, frame, boundaries, tilt, result):
-        if (site, choice, zoom, center, frame, boundaries, tilt) != (self.radar_site.get(), self.radar_product.get(),
+    def _show_level3(self, site, choice, zoom, center, frame, boundaries, tilt, mode, result):
+        if (site, choice, zoom, center, frame, boundaries, tilt, mode) != (self.radar_site.get(), self.radar_product.get(),
                                                               self.radar_zoom, self.radar_center, self.radar_frame,
-                                                              self.radar_boundaries.get(), int(self.radar_tilt.get().split()[-1])):
+                                                              self.radar_boundaries.get(), int(self.radar_tilt.get().split()[-1]), self.unit_mode.get()):
             self.root.after(0, self.refresh)
             return
         picture, stamp, field = result
@@ -730,9 +745,9 @@ class App:
         self.image_urls["radar"] = "site-radar"
         self._show_image("radar", "site-radar", picture)
 
-    def _show_swath(self, site, choice, zoom, center, result):
-        if (site, choice, zoom, center) != (self.radar_site.get(), self.radar_product.get(),
-                                            self.radar_zoom, self.radar_center):
+    def _show_swath(self, site, choice, zoom, center, mode, result):
+        if (site, choice, zoom, center, mode) != (self.radar_site.get(), self.radar_product.get(),
+                                            self.radar_zoom, self.radar_center, self.unit_mode.get()):
             self.root.after(0, self.refresh)
             return
         picture, stamp = result
@@ -786,12 +801,14 @@ class App:
         self.table.delete(*self.table.get_children())
         self.rows = {row.station: row for row in rows}
         for row in sorted(rows, key=lambda row: (row.station != self._station_for_settings(), row.station)):
-            self.table.insert("", "end", iid=row.station, values=(row.station, row.name, row.observed, f"{row.temp_c:.1f}" if row.temp_c is not None else "—", row.wind, row.visibility, row.flight_category))
+            self.table.insert("", "end", iid=row.station, values=(row.station, row.name, row.observed,
+                units.temperature(row.temp_c, self.unit_mode.get()), units.wind(row.wind, self.unit_mode.get()),
+                units.visibility_display(row.visibility, self.unit_mode.get()), row.flight_category))
         if not rows:
             self._set_details("No observations returned. Try loading a station directly.")
         current = self.rows.get(self._station_for_settings())
         if current and self.postal_location is None:
-            temperature = f"{current.temp_c:.1f} °C" if current.temp_c is not None else "temperature unavailable"
+            temperature = units.temperature(current.temp_c, self.unit_mode.get()) if current.temp_c is not None else "temperature unavailable"
             self.local_current.set(f"{current.station} · {temperature} · {current.conditions} · observed {current.observed}")
 
     def _set_details(self, content):
@@ -838,8 +855,9 @@ class App:
             if row.station not in self.rows:
                 self.table.insert("", 0, iid=row.station,
                                   values=(row.station, row.name, row.observed,
-                                          f"{row.temp_c:.1f}" if row.temp_c is not None else "—",
-                                          row.wind, row.visibility, row.flight_category))
+                                          units.temperature(row.temp_c, self.unit_mode.get()),
+                                          units.wind(row.wind, self.unit_mode.get()),
+                                          units.visibility_display(row.visibility, self.unit_mode.get()), row.flight_category))
             self.rows[row.station] = row
             saved = preferences.load()
             saved["station"] = row.station
@@ -867,13 +885,30 @@ class App:
             self.monitor_point = None
             self.monitor_enabled.set(False)
             preferences.save({"station": self._station_for_settings(), "country": previous.country,
-                              "postal_code": previous.code, "street": previous.street, "monitor_enabled": False})
+                              "postal_code": previous.code, "street": previous.street, "monitor_enabled": False,
+                              "units": self.unit_mode.get()})
             self.point_status.set("Set the new ZIP or postal code to resume local weather and alerts")
 
     def _save_preferences(self):
         preferences.save({"station": self._station_for_settings(), "country": self.country.get(),
                           "postal_code": self.postal_code.get(), "street": self.street.get(),
-                          "monitor_enabled": self.monitor_enabled.get()})
+                          "monitor_enabled": self.monitor_enabled.get(), "units": self.unit_mode.get()})
+
+    def _units_changed(self, _event=None):
+        saved = preferences.load()
+        saved["units"] = self.unit_mode.get()
+        preferences.save(saved)
+        self.guidance_last_fetch.clear()
+        if hasattr(self, "rows"):
+            self._show_observations(list(self.rows.values()))
+        if self.postal_location:
+            if self.local_observation is not None:
+                self._update_mini(self.local_observation)
+            self._refresh_local_weather()
+        self._refresh_guidance()
+        self._refresh_station_trend()
+        if self.tabs.index(self.tabs.select()) == 1:
+            self.refresh()
 
     def _station_for_settings(self):
         try:
@@ -971,7 +1006,8 @@ class App:
                 self._render_image(key, source)
 
     def _update_mini(self, row: data.Observation):
-        temperature = f"{row.temp_c:.1f} °C" if row.temp_c is not None else "Temperature unavailable"
+        self.local_observation = row
+        temperature = units.temperature(row.temp_c, self.unit_mode.get()) if row.temp_c is not None else "Temperature unavailable"
         code = self.postal_location.code if self.postal_location else "Local"
         self.mini_weather.set(f"{code} · {temperature}\n{row.conditions} · {row.station} airport\nObserved {row.observed}")
         self.local_current.set(f"{temperature} · {row.conditions} · nearby airport {row.station} · observed {row.observed}")
