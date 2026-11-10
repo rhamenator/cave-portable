@@ -446,9 +446,10 @@ class App:
                 elif choice in level3.PRODUCTS:
                     boundaries = self.radar_boundaries.get()
                     tilt = int(self.radar_tilt.get().split()[-1])
-                    alert_point = self.guidance_point[1:3] if self.guidance_point[3] == "US" else None
+                    alert_point = self.guidance_point[1:3]
+                    include_us_alerts = self.guidance_point[3] == "US"
                     self._submit("site-radar", lambda: level3.field_map(site, choice, sites, zoom, center, frame, boundaries, tilt,
-                                                                        alert_point),
+                                                                        alert_point, include_us_alerts),
                                  lambda result: self._show_level3(site, choice, zoom, center, frame, boundaries, tilt, result))
                 else:
                     self.radar_field = None

@@ -2,7 +2,7 @@
 
 A lightweight, cross-platform weather viewer inspired by the needs of AWIPS CAVE users. This is an **independent companion**, not a fork or replacement for the full AWIPS CAVE workstation. It runs without an EDEX server and does not issue warnings or its own severe-weather risk outlook.
 
-## What works in 0.4.2
+## What works in 0.4.3
 
 The decoded radar workspace reads current NOAA Level III digital reflectivity, base Doppler velocity, correlation coefficient (CC), differential reflectivity (ZDR), and specific differential phase (KDP) for the selected WSR-88D site. It shows scan time, selectable elevation tilts 0–3, palette, a short scan timeline, geographic zoom and pan, and values at clicked points. Products are matched to the same reflectivity volume; a missing match is shown as unavailable. Dual-pol fields are masked below 10 dBZ reflectivity. Optional SPC Day 1 and local NWS alert boundaries are drawn over the map. The local alert query uses the saved US location, and the map labels the official layer times and nearby airport observation time. Older radar frames explicitly identify current overlays as later data. Low CC has several possible causes and **does not by itself confirm debris**.
 

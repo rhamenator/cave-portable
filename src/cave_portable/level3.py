@@ -364,7 +364,8 @@ def render(field: Field, bbox: str, reflectivity: Field | None = None) -> Image.
 def field_map(site_name: str, product_name: str, sites: dict, zoom: int = 1,
               center: tuple[float, float] | None = None, frame: int = 0,
               include_overlays: bool = True, tilt: int = 0,
-              alert_point: tuple[float, float] | None = None):
+              alert_point: tuple[float, float] | None = None,
+              include_us_alerts: bool = True):
     from .radar import _bbox
 
     if site_name not in sites or product_name not in PRODUCTS:
@@ -385,6 +386,6 @@ def field_map(site_name: str, product_name: str, sites: dict, zoom: int = 1,
     if include_overlays:
         from . import overlays
         image, note = overlays.draw(image, bbox, alert_point or center or (field.latitude, field.longitude),
-                                    scan_time=field.time)
+                                    include_alerts=include_us_alerts, scan_time=field.time)
         stamp += " · " + note
     return image, stamp, field

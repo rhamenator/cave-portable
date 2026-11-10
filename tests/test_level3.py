@@ -110,6 +110,9 @@ class Level3Tests(unittest.TestCase):
         level3.field_map("GRR · Grand Rapids", "Digital reflectivity", radar.SITES,
                          alert_point=(42.7761, -84.5997))
         self.assertEqual(draw.call_args.args[2], (42.7761, -84.5997))
+        level3.field_map("GRR · Grand Rapids", "Digital reflectivity", radar.SITES,
+                         alert_point=(43.65, -79.38), include_us_alerts=False)
+        self.assertFalse(draw.call_args.kwargs["include_alerts"])
 
     @patch.object(model, "_fetch")
     def test_gfs_catalog_has_explicit_run_paths(self, fetch):
