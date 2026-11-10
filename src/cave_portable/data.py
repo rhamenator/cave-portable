@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 from . import units
 
-USER_AGENT = "CAVE-Portable/0.4.7 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.5.0 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
