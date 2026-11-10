@@ -2,7 +2,7 @@
 
 ## Current release
 
-0.3.1 adds decoded NOAA Level III digital reflectivity, CC, ZDR, and KDP, plus map inspection, pan/zoom, a short scan timeline, official SPC/NWS boundaries, on-demand NOAA MRMS MESH hail estimate at a selected CONUS point, explicit GFS run/field/lead selection for CAPE/CIN/humidity/dewpoint, and a local briefing. These were exercised in a running Linux GTK build. The app still lacks decoded Level II and velocity data, mapped hail swaths, multi-tilt analysis, EDEX integration, soundings, and independently validated severe-weather prediction. The older storm-relative velocity and hydrometeor products are upstream imagery.
+0.3.2 adds decoded NOAA Level III digital reflectivity, CC, ZDR, and KDP, plus map inspection, pan/zoom, a short scan timeline, official SPC/NWS boundaries, on-demand NOAA MRMS MESH hail estimate at a selected CONUS point, explicit GFS run/field/lead selection for CAPE/CIN/humidity/dewpoint, and a local briefing. These were exercised in a running Linux GTK build. The app still lacks decoded Level II and velocity data, mapped hail swaths, multi-tilt analysis, EDEX integration, soundings, and independently validated severe-weather prediction. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 ## Next milestones
 

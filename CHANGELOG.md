@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2 — 2026-11-09
+
+- Use the bundled Adwaita GTK theme on Linux so text stays readable when another desktop theme needs an SVG loader absent from the bundle. Verified against the published 0.3.1 Linux archive in a clean desktop smoke test.
+
 ## 0.3.1 — 2026-11-09
 
 - Correct Linux release packaging after the initial 0.3.0 tag failed the GTK/ecCodes CFFI check. All four platform bundles built in the follow-up workflow.
