@@ -4,14 +4,16 @@ See the [native-code assessment](PORTING_ASSESSMENT.md) for measured performance
 
 ## Current release
 
-0.4.1 adds a timestamp-based airport pressure trend and GFS storm-relative helicity and 500 hPa wind-speed layers. The research-only outlook replay selects SPC polygons that were actually issued by a requested time. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
+0.4.2 adds one-volume timeline matching for decoded Level III fields and labels current official overlays on the radar map. It includes the 0.4.1 airport pressure trend, GFS forecast ingredients, and research-only outlook replay. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 The source branch also contains [NOAA observational replay](NOAA_REPLAY.md) tools for historical case studies. Locally generated severe-weather prediction remains a later research question.
+
+The source branch's live radar workspace now anchors reflectivity, velocity, and dual-polarization products to one Level III reflectivity volume, rejects an unmatched field, and labels the scan alongside current SPC, NWS, and nearby airport layers. Its official alert query follows the saved US location rather than the radar site. Current overlays are explicitly marked as live when the user selects an older radar scan. This is still a single-radar Level III view; historical warnings are not yet replayed in the desktop app.
 
 ## Next milestones
 
 1. Extend decoding to Level II and add radar volume analysis and loop playback. Preserve site, tilt, scan time, units, legend, and freshness checks. Do not use stale archived products as live imagery. See [CAVE capability research](CAVE_RESEARCH.md).
-2. Interactive map with station, radar, satellite, and SPC polygon layers; pan/zoom and valid-time controls.
+2. Expand the existing pan/zoom Level III map into a reusable map with selectable radar, satellite, observations, and official warning/outlook layers. Add clear controls for each layer's source time and validity rather than relying on one long status line.
 3. A time-aligned event viewer combining archived NOAA surface observations, NEXRAD volumes, official warning issue times, and storm reports. Show data gaps and observation ages.
 4. Soundings and measured time series for situational awareness.
 5. Optional read-only EDEX data integration, keeping the lightweight standalone mode.

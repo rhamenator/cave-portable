@@ -35,6 +35,14 @@ def _rings(geometry: dict) -> list[list[tuple[float, float]]]:
     return result
 
 
+def _time(value) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+    except (ValueError, TypeError):
+        return None
+
+
 @lru_cache(maxsize=32)
 def _local_alerts(lat: float, lon: float, cache_slot: int):
     del cache_slot
@@ -50,16 +58,14 @@ def _local_alerts(lat: float, lon: float, cache_slot: int):
         props = item.get("properties", {})
         if not isinstance(props, dict):
             continue
-        try:
-            expires = datetime.fromisoformat(str(props.get("expires")).replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if expires <= current:
+        expires = _time(props.get("expires"))
+        if expires is None or expires <= current:
             continue
         event = str(props.get("event", ""))[:90]
         kind = "warning" if "Warning" in event else "watch" if "Watch" in event else "other"
         if kind != "other":
-            result.append((kind, event, _rings(item.get("geometry"))))
+            result.append((kind, event, _rings(item.get("geometry")),
+                           _time(props.get("sent")), _time(props.get("effective")), expires))
     return result
 
 
@@ -92,12 +98,20 @@ def _spc_outlook(bbox: str, cache_slot: int):
         except (KeyError, ValueError, TypeError):
             continue
         if category:
-            result.append((category, _rings(item.get("geometry"))))
+            result.append((category, _rings(item.get("geometry")), issue,
+                           spc._time(attrs["valid"]), spc._time(attrs["expire"])))
     return result
 
 
+@lru_cache(maxsize=32)
+def _nearby_observation(lat: float, lon: float, cache_slot: int):
+    del cache_slot
+    return data.nearby_metar(lat, lon)
+
+
 def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None,
-         include_spc: bool = True, include_alerts: bool = True) -> tuple[Image.Image, str]:
+         include_spc: bool = True, include_alerts: bool = True,
+         scan_time: datetime | None = None) -> tuple[Image.Image, str]:
     """Paint source geometries and name missing overlays in the returned status."""
     west, south, east, north = (float(value) for value in bbox.split(","))
     output = image.copy().convert("RGB")
@@ -117,17 +131,27 @@ def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None
             outlooks = _spc_outlook(bbox, int(now.timestamp()) // 300)
             colors = {"General thunderstorm": "#43a3c2", "Marginal": "#46ab5a",
                       "Slight": "#e8b536", "Enhanced": "#e48638", "Moderate": "#d64749", "High": "#ad4db5"}
-            for category, rings in outlooks:
+            for category, rings, _issue, _valid, _expire in outlooks:
                 paint(rings, colors[category], 3)
-            notes.append(f"SPC Day 1: {len(outlooks)} area(s)")
+            if outlooks:
+                _category, _rings_data, issue, valid, expire = outlooks[0]
+                notes.append(f"SPC Day 1: {len(outlooks)} area(s), issued {issue:%H:%M} UTC, "
+                             f"valid {valid:%d %b %H:%M}–{expire:%d %b %H:%M} UTC")
+            else:
+                notes.append("SPC Day 1: no current area in map")
         except data.DataError:
             notes.append("SPC overlay unavailable")
     if include_alerts and point is not None:
         try:
             alerts = _local_alerts(round(point[0], 4), round(point[1], 4), int(now.timestamp()) // 300)
-            for kind, _event, rings in alerts:
+            for kind, _event, rings, _sent, _effective, _expires in alerts:
                 paint(rings, "#e02238" if kind == "warning" else "#f1c128", 4)
-            notes.append(f"NWS local warnings/watches: {len(alerts)}")
+            polygons = sum(bool(rings) for _kind, _event, rings, _sent, _effective, _expires in alerts)
+            notes.append(f"NWS warnings/watches at selected location: {len(alerts)}, "
+                         f"{polygons} with polygons (checked {now:%H:%M} UTC)")
+            for kind, event, _rings_data, sent, _effective, expires in alerts[:2]:
+                notes.append(f"{event}: issued {sent:%H:%M} UTC, expires {expires:%H:%M} UTC"
+                             if sent else f"{event}: expires {expires:%H:%M} UTC")
         except data.DataError:
             notes.append("NWS alert overlay unavailable")
     if point:
@@ -137,4 +161,19 @@ def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None
         if 0 <= x < image.width and 0 <= y < image.height:
             painter.ellipse((x - 5, y - 5, x + 5, y + 5), fill="white", outline="black", width=2)
             painter.text((x + 8, y - 8), "Selected location", fill="black", stroke_width=2, stroke_fill="white")
+        try:
+            observation = _nearby_observation(round(lat, 3), round(lon, 3), int(now.timestamp()) // 300)
+            notes.append(f"{observation.station} observation {observation.observed}: "
+                         f"{observation.temp_c:.0f} °C, {observation.wind}")
+            if observation.lat is not None and observation.lon is not None:
+                ox = (observation.lon - west) / (east - west) * image.width
+                oy = (north - observation.lat) / (north - south) * image.height
+                if 0 <= ox < image.width and 0 <= oy < image.height:
+                    painter.ellipse((ox - 4, oy - 4, ox + 4, oy + 4), fill="#f5f5f5", outline="#17253b", width=2)
+                    painter.text((ox + 7, oy + 6), observation.station, fill="black",
+                                 stroke_width=2, stroke_fill="white")
+        except data.DataError:
+            notes.append("Nearby airport observation unavailable")
+    if scan_time is not None and now - scan_time > timedelta(minutes=2):
+        notes.insert(0, "Overlays/observation are current, not archived at radar scan time")
     return output, " · ".join(notes)

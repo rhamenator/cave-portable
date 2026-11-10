@@ -237,6 +237,33 @@ def fetch_field(site: str, product: str, frame: int = 0,
     return field
 
 
+def fetch_field_near(site: str, product: str, scan_time: datetime,
+                     now: datetime | None = None, latest: bool = False) -> Field:
+    """Fetch a product from the same radar volume, never a frame-index substitute."""
+    keys = recent_keys(site, product, now)
+    if not keys:
+        raise DataError(f"No recent {product} scans for this radar")
+    candidates = sorted(keys, key=lambda key: abs(_key_time(key) - scan_time))
+    key = candidates[0]
+    if abs(_key_time(key) - scan_time) > timedelta(minutes=2):
+        raise DataError(f"No {product} scan matches the selected reflectivity volume")
+    field = decode(_fetch(BUCKET + quote(key), MAX_FILE, "application/octet-stream"), site, product)
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if (abs(field.time - scan_time) > timedelta(minutes=2)
+            or field.time > current + timedelta(minutes=5)
+            or current - field.time > timedelta(minutes=30)
+            or (latest and current - field.time > timedelta(minutes=15))):
+        raise DataError(f"No timely {product} scan matches the selected volume")
+    return field
+
+
+def _key_time(key: str) -> datetime:
+    match = KEY.fullmatch(key)
+    if match is None:
+        raise DataError("Invalid NEXRAD object key")
+    return datetime.strptime(match["time"], "%Y_%m_%d_%H_%M_%S").replace(tzinfo=timezone.utc)
+
+
 def _color(product: str, value: float) -> tuple[int, int, int, int]:
     if product[-1] in "GU":
         if value < -35: return 22, 110, 50, 220
@@ -336,25 +363,28 @@ def render(field: Field, bbox: str, reflectivity: Field | None = None) -> Image.
 
 def field_map(site_name: str, product_name: str, sites: dict, zoom: int = 1,
               center: tuple[float, float] | None = None, frame: int = 0,
-              include_overlays: bool = True, tilt: int = 0):
+              include_overlays: bool = True, tilt: int = 0,
+              alert_point: tuple[float, float] | None = None):
     from .radar import _bbox
 
     if site_name not in sites or product_name not in PRODUCTS:
         raise DataError("Unknown radar site or product")
     product, _code, unit = product_for_tilt(product_name, tilt)
-    field = fetch_field(sites[site_name][0], product, frame)
-    reflectivity = None
-    if product[-1] in "CXK":
-        reflectivity = fetch_field(sites[site_name][0], f"N{tilt}B", frame)
-        if abs(field.time - reflectivity.time) > timedelta(minutes=5):
-            raise DataError("Reflectivity and dual-pol scans did not match")
+    radar_site = sites[site_name][0]
+    # A single reflectivity volume anchors the timeline for every field.
+    # Product-specific frame indices can otherwise silently mix scan times.
+    anchor = fetch_field(radar_site, f"N{tilt}B", frame)
+    field = anchor if product == anchor.product else fetch_field_near(radar_site, product, anchor.time, latest=frame == 0)
+    reflectivity = anchor if product[-1] in "CXK" else None
     bbox = _bbox(site_name, sites, zoom, center)
     image = render(field, bbox, reflectivity)
-    stamp = f"{field.time:%d %b %Y %H:%M UTC} · {field.elevation:.1f}° · {unit} · NOAA Level III"
+    stamp = (f"Volume {anchor.time:%d %b %Y %H:%M UTC} · "
+             f"{product_name} field {field.time:%H:%M UTC} · {field.elevation:.1f}° · {unit} · NOAA Level III")
     if reflectivity:
         stamp += " · masked below 10 dBZ"
     if include_overlays:
         from . import overlays
-        image, note = overlays.draw(image, bbox, center or (field.latitude, field.longitude))
+        image, note = overlays.draw(image, bbox, alert_point or center or (field.latitude, field.longitude),
+                                    scan_time=field.time)
         stamp += " · " + note
     return image, stamp, field
