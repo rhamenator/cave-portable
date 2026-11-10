@@ -387,6 +387,7 @@ def field_map(site_name: str, product_name: str, sites: dict, zoom: int = 1,
         from . import overlays
         image, note = overlays.draw(image, bbox, alert_point or center or (field.latitude, field.longitude),
                                     include_local_alerts=include_us_alerts, scan_time=field.time,
-                                    radar_point=(field.latitude, field.longitude))
+                                    radar_point=(field.latitude, field.longitude),
+                                    include_canadian_alerts=not include_us_alerts)
         stamp += " · " + note
     return image, stamp, field

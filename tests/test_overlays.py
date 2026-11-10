@@ -22,6 +22,36 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual([(row[0], row[1]) for row in rows],
                          [("advisory", "Winter Weather Advisory")])
 
+    def test_zone_based_winter_alert_uses_noaa_boundary(self):
+        now = datetime.now(timezone.utc)
+        payload = {"features": [{"properties": {
+            "event": "Winter Storm Warning", "status": "Actual",
+            "expires": (now + timedelta(hours=2)).isoformat(),
+            "affectedZones": ["https://api.weather.gov/zones/forecast/MIZ076"]},
+            "geometry": None}]}
+        zone = [[(-83.5, 42.2), (-83.0, 42.2), (-83.0, 42.6)]]
+        with (patch.object(overlays.data, "_json", return_value=payload),
+              patch.object(overlays, "_zone_geometries", return_value={"MIZ076": zone})):
+            rows = overlays._state_alerts("MI", "-84,42,-82,43", 1)
+        self.assertEqual(rows[0][2], zone)
+
+    def test_eccc_alert_geometry_and_times(self):
+        now = datetime.now(timezone.utc)
+        payload = {"numberMatched": 1, "features": [{"properties": {
+            "alert_type": "warning", "alert_name_en": "Snowfall warning", "status_en": "issued",
+            "publication_datetime": (now - timedelta(minutes=5)).isoformat(),
+            "validity_datetime": (now - timedelta(minutes=5)).isoformat(),
+            "expiration_datetime": (now + timedelta(hours=2)).isoformat()},
+            "geometry": {"type": "Polygon", "coordinates": [[[-83.4, 42.2], [-83.0, 42.2], [-83.0, 42.6]]]}}]}
+        with (patch.object(overlays.data, "_json", return_value=payload),
+              patch.object(overlays, "_nearby_observation", side_effect=overlays.data.DataError("none"))):
+            image, note = overlays.draw(Image.new("RGB", (200, 100)), "-84,42,-82,43",
+                                        include_spc=False, include_canadian_alerts=True)
+        self.assertEqual(image.size, (200, 100))
+        self.assertIn("ECCC Snowfall warning", note)
+        self.assertIn("issued", note)
+        self.assertIn("valid", note)
+
     def test_canadian_point_keeps_michigan_border_warning_context(self):
         now = datetime.now(timezone.utc)
         warning = ("warning", "Tornado Warning", [[(-83.4, 42.2), (-83.0, 42.2), (-83.0, 42.6)]],

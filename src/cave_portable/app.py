@@ -510,6 +510,10 @@ class App:
         place, lat, lon, country = self.guidance_point
         self._refresh_local_alert_summary()
         if country != "US":
+            now = datetime.now(timezone.utc)
+            if (country == "CA" and ("winter" not in self.guidance_last_fetch
+                    or now - self.guidance_last_fetch["winter"] >= timedelta(minutes=10))):
+                self._submit("winter-forecast", lambda: (target, data.canadian_winter_forecast(lat, lon)), self._show_winter_forecast)
             return
         target = self.guidance_point
         now = datetime.now(timezone.utc)

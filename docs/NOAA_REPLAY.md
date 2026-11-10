@@ -65,3 +65,16 @@ For the next observational case study, add NCEI Level II volumes, official warni
 The [NWS Detroit event review](https://www.weather.gov/dtx/severeweather0902032026) reports an EF2 tornado beginning in east Detroit at about 20:14 UTC on 3 September 2026 and crossing the Detroit River. [Western University's Northern Tornadoes Project](https://www.uwo.ca/ntp/blog/2026/two_tornadoes_and_a_downburst_in_sw_on_on_sep_3.html) assesses the Windsor continuation as EF1, with its Canadian damage track beginning around 20:18 UTC. The NTP says Detroit radar indicated a tornado debris signature; our own CC rendering is **not** a validated debris detector.
 
 Using the public Level III archive with a 20:18 UTC cutoff, the existing decoder selected KDTX tilt-0 reflectivity at 20:17:33 UTC and correlation coefficient at 20:17:53 UTC. Both archive object names carry the 20:17:15 stamp. They decode within the same radar volume and can be rendered over a Detroit–Windsor viewport. This validates that the radar archive can support a cross-border replay; it does not establish whether an alert was issued in time or whether this app would have identified the tornado. A future replay must align NWS and ECCC warning issue times with radar, and should compare the closer TDTW airport radar if that feed is available and licensed for this use.
+
+## December 2022 Michigan winter case
+
+The [NWS Detroit event review](https://www.weather.gov/dtx/December-22-25-2022-Winter-Storm) describes rain changing rapidly to snow, a flash freeze, strong wind, and reported snow totals over 22–25 December. The [NWS Grand Rapids review](https://www.weather.gov/grr/2022December23Blizzard) documents blizzard conditions, a 51 mph Lansing gust on 23 December, and highly variable 72-hour snow reports. This combination is why a snow amount alone would have understated the event's danger.
+
+Replayed at **23 December 2022 20:00 UTC**, the existing Level III decoder selected a KGRR tilt-0 digital reflectivity scan at **19:58:14 UTC**, 1.8 minutes old. The existing one-minute KLAN replay found **181/181 expected slots** from 17:00–20:00 UTC, with a maximum five-second gust of **44 kt** in that window. The radar and airport data are observations only; neither estimates point snowfall or identifies freezing rain. Reproduce with:
+
+```bash
+.venv/bin/python scripts/noaa_radar_replay.py --site GRR --product 'Digital reflectivity' --as-of 2022-12-23T20:00Z --bbox=-85.2,42.3,-83.9,43.3 --output /tmp/cave-winter-grr.png
+.venv/bin/python scripts/noaa_asos_replay.py --station LAN --as-of 2022-12-23T20:00Z
+```
+
+The current NWS grid API does not expose the as-issued December 2022 snowfall and ice forecast grids, and these replays do not include a historical warning feed. **Forecast accumulation error and warning lead time remain unmeasured.** The winter briefing therefore labels the largest individual 48-hour forecast interval and the official categorical precipitation types, without presenting them as a storm total, probability, or verified skill score. A future case study needs archived as-issued NWS grids and NWS/ECCC alert versions paired with observed snowfall and ice reports.

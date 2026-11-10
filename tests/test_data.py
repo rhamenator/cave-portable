@@ -80,6 +80,27 @@ class DataTests(unittest.TestCase):
         self.assertIn("gust 40 mph", summary)
         self.assertIn("not a 48 h total", summary)
 
+    def test_winter_weather_codes_and_mixed_duration(self):
+        now = datetime(2026, 11, 10, 6, tzinfo=timezone.utc)
+        field = {"values": [{"validTime": "2026-11-10T05:00:00+00:00/P1DT13H",
+                             "value": [{"weather": "freezing_rain"}, {"weather": "snow"}]}]}
+        self.assertEqual(len(data._winter_types(field, now)), 2)
+        peak = data._grid_peak({"values": [{"validTime": "2026-11-10T05:00:00+00:00/P1DT13H", "value": 25.4}]}, now)
+        self.assertEqual(peak[0], 25.4)
+
+    @patch.object(data, "_json")
+    def test_canadian_city_forecast_keeps_issued_wording(self, fetch):
+        now = datetime(2026, 11, 10, 6, tzinfo=timezone.utc)
+        fetch.return_value = {"features": [{"geometry": {"coordinates": [-83.03, 42.31]},
+            "properties": {"name": {"en": "Windsor"}, "forecastGroup": {
+                "timestamp": {"en": "2026-11-10T02:00:00+00:00"},
+                "forecasts": [{"period": {"textForecastName": {"en": "Tonight"}},
+                               "textSummary": {"en": "Snow beginning overnight. Amount 5 cm."}}]}}}]}
+        summary = data.canadian_winter_forecast(42.31, -83.03, now)
+        self.assertIn("Windsor", summary)
+        self.assertIn("Amount 5 cm", summary)
+        self.assertIn("not a point accumulation estimate", summary)
+
     @patch.object(data, "_json")
     def test_canadian_alerts_filter_warning_and_expiry(self, fetch):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()

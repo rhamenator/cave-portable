@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-USER_AGENT = "CAVE-Portable/0.4.4 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.4.5 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
@@ -319,22 +319,48 @@ def _grid_peak(field: dict, now: datetime, hours: int = 48):
     for entry in field["values"][:500]:
         if not isinstance(entry, dict) or not isinstance(entry.get("validTime"), str):
             continue
-        try:
-            start_text, duration = entry["validTime"].split("/", 1)
-            start = datetime.fromisoformat(start_text.replace("Z", "+00:00")).astimezone(timezone.utc)
-        except (ValueError, TypeError):
+        interval = _grid_interval(entry["validTime"])
+        if interval is None:
             continue
-        match = re.fullmatch(r"P(?:(\d+)D|T(\d+)H)", duration)
-        if match is None:
-            continue
-        span = timedelta(days=int(match[1])) if match[1] else timedelta(hours=int(match[2]))
-        end = start + span
+        start, end = interval
         value = entry.get("value")
-        if (span <= timedelta(0) or end <= now or start >= now + timedelta(hours=hours)
+        if (end <= now or start >= now + timedelta(hours=hours)
                 or not isinstance(value, (int, float)) or not math.isfinite(value)):
             continue
         choices.append((float(value), start, end))
     return max(choices, key=lambda item: (item[0], item[1])) if choices else None
+
+
+def _grid_interval(value: str):
+    try:
+        start_text, duration = value.split("/", 1)
+        start = datetime.fromisoformat(start_text.replace("Z", "+00:00")).astimezone(timezone.utc)
+        match = re.fullmatch(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?", duration)
+        if match is None:
+            return None
+        span = timedelta(days=int(match[1] or 0), hours=int(match[2] or 0), minutes=int(match[3] or 0))
+        return (start, start + span) if span > timedelta(0) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _winter_types(field: dict, now: datetime):
+    """NWS categorical weather types, with the earliest intersecting valid interval."""
+    names = {"rain": "rain", "rain_showers": "rain showers", "snow": "snow",
+             "snow_showers": "snow showers", "freezing_rain": "freezing rain",
+             "freezing_drizzle": "freezing drizzle", "ice_pellets": "ice pellets"}
+    found = {}
+    for entry in (field.get("values", []) if isinstance(field, dict) else [])[:500]:
+        interval = _grid_interval(entry.get("validTime", "")) if isinstance(entry, dict) else None
+        if not interval or interval[1] <= now or interval[0] >= now + timedelta(hours=48):
+            continue
+        for condition in entry.get("value") or []:
+            if not isinstance(condition, dict):
+                continue
+            name = names.get(str(condition.get("weather", "")).lower())
+            if name and (name not in found or interval[0] < found[name]):
+                found[name] = interval[0]
+    return [f"{name} from {when:%d %b %H:%M} UTC" for name, when in sorted(found.items(), key=lambda x: x[1])]
 
 
 def winter_forecast(lat: float, lon: float, now: datetime | None = None) -> str:
@@ -371,10 +397,64 @@ def winter_forecast(lat: float, lon: float, now: datetime | None = None) -> str:
             precision = 1 if label != "gust" else 0
             parts.append(f"{label} {value * factor:.{precision}f} {display_unit} "
                          f"({start:%d %b %H:%M}–{end:%d %b %H:%M} UTC)")
+    types = _winter_types(fields.get("weather"), current)
+    if types:
+        parts.append("forecast precipitation type: " + ", ".join(types))
     if not parts:
         raise DataError("NWS forecast grid lacked usable winter periods")
     return (f"NWS winter ingredients, next 48 h · grid updated {updated:%d %b %H:%M UTC} · "
             + "; ".join(parts) + " · largest forecast interval, not a 48 h total")
+
+
+def canadian_winter_forecast(lat: float, lon: float, now: datetime | None = None) -> str:
+    """Nearby ECCC city forecast wording; no extrapolated accumulation at the saved point."""
+    if not (math.isfinite(lat) and math.isfinite(lon) and 41 <= lat <= 84 and -142 <= lon <= -52):
+        raise DataError("ECCC city forecast location was invalid")
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    features = []
+    for radius in (0.2, 0.8):
+        bbox = f"{lon-radius:.3f},{lat-radius:.3f},{lon+radius:.3f},{lat+radius:.3f}"
+        payload = _json("https://api.weather.gc.ca/collections/citypageweather-realtime/items?" +
+                        urlencode({"bbox": bbox, "limit": 20, "f": "json"}))
+        if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+            raise DataError("ECCC city forecast response was invalid")
+        features = payload["features"]
+        if features:
+            break
+    choices = []
+    for item in features:
+        coordinates = item.get("geometry", {}).get("coordinates", []) if isinstance(item, dict) else []
+        if len(coordinates) < 2:
+            continue
+        try:
+            distance = (float(coordinates[1]) - lat) ** 2 + ((float(coordinates[0]) - lon) * math.cos(math.radians(lat))) ** 2
+        except (TypeError, ValueError):
+            continue
+        choices.append((distance, item))
+    if not choices:
+        raise DataError("No nearby ECCC city forecast is available")
+    _distance, item = min(choices, key=lambda pair: pair[0])
+    props = item.get("properties", {})
+    group = props.get("forecastGroup", {})
+    try:
+        issued = datetime.fromisoformat(str(group["timestamp"]["en"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DataError("ECCC city forecast issue time is unavailable") from exc
+    if issued > current + timedelta(minutes=5) or current - issued > timedelta(hours=30):
+        raise DataError("ECCC city forecast is stale")
+    name = str(props.get("name", {}).get("en") or "nearby city")[:70]
+    lines = []
+    for forecast in group.get("forecasts", [])[:4]:
+        if not isinstance(forecast, dict):
+            continue
+        period = str(forecast.get("period", {}).get("textForecastName", {}).get("en") or "Period")[:35]
+        summary = str(forecast.get("textSummary", {}).get("en") or "").strip()[:350]
+        if summary:
+            lines.append(f"{period}: {summary}")
+    if not lines:
+        raise DataError("ECCC city forecast had no usable periods")
+    return (f"ECCC forecast for {name} · issued {issued:%d %b %H:%M UTC} · "
+            + " · ".join(lines) + " · city forecast, not a point accumulation estimate")
 
 
 def alerts(state: str) -> list[tuple[str, str, str]]:
