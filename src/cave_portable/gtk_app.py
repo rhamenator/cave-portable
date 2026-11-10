@@ -184,6 +184,9 @@ class App:
         self.local_hourly_label = label("NWS hourly forecast loading…")
         self.local_hourly_label.set_line_wrap(True)
         briefing_box.pack_start(self.local_hourly_label, False, False, 0)
+        self.local_winter_label = label("NWS snow, ice, and gust forecast loading…")
+        self.local_winter_label.set_line_wrap(True)
+        briefing_box.pack_start(self.local_winter_label, False, False, 0)
         self.hail_label = label("MRMS MESH hail estimate: select Check hail for an on-demand reading")
         self.hail_label.set_line_wrap(True)
         briefing_box.pack_start(row(button("Check hail near point", self.check_hail), self.hail_label), False, False, 0)
@@ -337,6 +340,8 @@ class App:
                 self.local_forecast_label.set_text(f"Local NWS forecast unavailable: {exc}")
             elif key == "hourly-forecast":
                 self.local_hourly_label.set_text(f"NWS hourly forecast unavailable: {exc}")
+            elif key == "winter-forecast":
+                self.local_winter_label.set_text(f"NWS winter forecast grid unavailable: {exc}")
             elif key == "mrms-hail":
                 self.hail_label.set_text(f"MRMS MESH hail estimate unavailable: {exc}")
             elif key == "local-alert-summary":
@@ -424,6 +429,8 @@ class App:
                                                else "NWS point forecasts cover the contiguous US")
             self.local_hourly_label.set_text("Loading local NWS hourly forecast…" if country == "US"
                                              else "NWS hourly forecasts cover the contiguous US")
+            self.local_winter_label.set_text("Loading NWS snow, ice, and gust forecast…" if country == "US"
+                                             else "NWS winter forecast grid covers the contiguous US")
             self.local_alert_label.set_text("Local official warnings and watches loading…")
             self.hail_label.set_text("MRMS MESH hail estimate: select Check hail for this point")
             if self.tabs.get_current_page() in (0, 3, 5):
@@ -442,6 +449,8 @@ class App:
             self.submit("point-forecast", lambda: (target, data.point_forecast(lat, lon)), self.show_nws_forecast)
         if "hourly" not in self.guidance_last_fetch or now - self.guidance_last_fetch["hourly"] >= timedelta(minutes=10):
             self.submit("hourly-forecast", lambda: (target, data.hourly_forecast(lat, lon)), self.show_hourly_forecast)
+        if "winter" not in self.guidance_last_fetch or now - self.guidance_last_fetch["winter"] >= timedelta(minutes=10):
+            self.submit("winter-forecast", lambda: (target, data.winter_forecast(lat, lon)), self.show_winter_forecast)
 
     def refresh_station_trend(self):
         station = self.valid_station()
@@ -487,6 +496,14 @@ class App:
         self.guidance_last_fetch["hourly"] = datetime.now(timezone.utc)
         self.local_hourly_label.set_text(forecast)
 
+    def show_winter_forecast(self, result):
+        target, forecast = result
+        if target != self.guidance_point:
+            self.refresh_guidance()
+            return
+        self.guidance_last_fetch["winter"] = datetime.now(timezone.utc)
+        self.local_winter_label.set_text(forecast)
+
     def check_hail(self):
         target = self.guidance_point
         place, lat, lon, country = target
@@ -517,9 +534,11 @@ class App:
         self.guidance_last_fetch["alerts"] = datetime.now(timezone.utc)
         warnings = [item for item in alerts if item.level == "warning"]
         watches = [item for item in alerts if item.level == "watch"]
-        summary = f"Official local alerts: {len(warnings)} warning(s), {len(watches)} watch(es)"
-        if warnings or watches:
-            summary += " · " + (warnings or watches)[0].headline[:130]
+        advisories = [item for item in alerts if item.level == "advisory"]
+        summary = (f"Official local alerts: {len(warnings)} warning(s), {len(watches)} watch(es), "
+                   f"{len(advisories)} advisories")
+        if warnings or watches or advisories:
+            summary += " · " + (warnings or watches or advisories)[0].headline[:130]
         self.local_alert_label.set_text(summary)
 
     def set_radar_zoom(self, factor: int):
@@ -875,9 +894,12 @@ class App:
             return
         warnings = [item for item in alerts if item.level == "warning"]
         watches = [item for item in alerts if item.level == "watch"]
+        advisories = [item for item in alerts if item.level == "advisory"]
         self.set_indicator_level("warning" if warnings else "watch" if watches else "normal")
-        self.point_status.set_text(f"{target.code} centroid · {len(warnings)} official warning(s), {len(watches)} watch(es)")
-        fresh = [item for item in alerts if item.identifier not in self.monitor_seen]
+        self.point_status.set_text(f"{target.code} centroid · {len(warnings)} official warning(s), "
+                                   f"{len(watches)} watch(es), {len(advisories)} advisories")
+        fresh = [item for item in alerts if item.level in ("warning", "watch")
+                 and item.identifier not in self.monitor_seen]
         self.monitor_seen.update(item.identifier for item in alerts)
         if fresh:
             if any(item.level == "warning" for item in fresh):
