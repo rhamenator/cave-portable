@@ -14,12 +14,28 @@ from urllib.request import Request, urlopen
 
 from . import units
 
-USER_AGENT = "CAVE-Portable/0.4.7 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.5.0 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
     "KJFK", "KDCA", "KCLT", "KMCI", "KSTL", "KBNA", "KMSY", "KABQ",
 )
+COUNTRY_STATIONS = {
+    "US": STATIONS,
+    "CA": ("CYYZ", "CYUL", "CYVR", "CYOW", "CYWG", "CYEG", "CYYC", "CYHZ", "CYYT", "CYQB", "CYXU", "CYHM", "CYQG"),
+    "UK": ("EGLL", "EGKK", "EGLC", "EGBB", "EGCC", "EGPH", "EGPF", "EGAA", "EGSS", "EGNM", "EGNT", "EGHI", "EGTE", "EGPD", "EGNX"),
+}
+
+
+def stations_for_country(country: str) -> tuple[str, ...]:
+    return COUNTRY_STATIONS.get(country, STATIONS)
+
+
+def station_matches_country(station: str, country: str) -> bool:
+    code = station.upper()
+    return ((country == "UK" and code.startswith("EG")) or
+            (country == "CA" and code.startswith("C")) or
+            (country == "US" and code.startswith(("K", "P"))))
 RADAR_URL = "https://radar.weather.gov/ridge/standard/CONUS_0.gif"
 SATELLITE = {
     "GOES East": "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/CONUS/GEOCOLOR/1250x750.jpg",

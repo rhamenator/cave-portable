@@ -23,7 +23,7 @@ try:
 except (ImportError, ValueError):
     AyatanaAppIndicator3 = None
 
-from . import __version__, data, hrrr, level3, location, model, mrms, preferences, radar, spc, units
+from . import __version__, data, hrrr, level3, location, model, mrms, preferences, radar, spc, uk, units
 
 
 def label(text: str) -> Gtk.Label:
@@ -73,6 +73,7 @@ class App:
         self.saved = preferences.load()
         self.unit_mode = self.saved.get("units", units.DEFAULT)
         self.radar_sites = dict(radar.SITES)
+        self.radar_catalog_loaded = False
         self.radar_zoom = 1
         self.radar_center: tuple[float, float] | None = None
         self.radar_field: level3.Field | None = None
@@ -98,8 +99,9 @@ class App:
         outer.set_border_width(12)
         self.window.add(outer)
 
+        self.source_label = label("CAVE PORTABLE · NOAA / NWS / SPC")
         header = row(Gtk.Image.new_from_file(str(files("cave_portable").joinpath("assets/icon-32.png"))),
-                     label("CAVE PORTABLE · NOAA / NWS / SPC"))
+                     self.source_label)
         header.pack_end(button("Refresh", self.refresh), False, False, 0)
         header.pack_end(button("Official warnings", self.open_official), False, False, 0)
         header.pack_end(button("Minimize to tray", self.minimize_to_tray), False, False, 0)
@@ -111,15 +113,17 @@ class App:
         outer.pack_start(self.tabs, True, True, 0)
         self.observations_ui()
         self.image_ui("radar", "Radar", "Decoded NOAA Level III radar at the selected site · optional national composite")
-        self.image_ui("satellite", "Satellite", "NOAA/NESDIS GOES GeoColor")
-        self.image_ui("severe", "Severe outlook & CAPE", "SPC categorical outlooks and Southern Plains MLCAPE")
-        self.image_ui("model", "Forecast ingredients", "Selected GFS run and field · NSF Unidata THREDDS / USGS map")
-        self.image_ui("hrrr", "HRRR storm forecast", "NCEP HRRR simulated reflectivity · forecast, not observed radar")
-        self.tabs.connect("switch-page", lambda *_args: GLib.idle_add(self.refresh))
+        self.update_country_labels()
+        self.image_ui("satellite", "GOES satellite (US/CA)", "NOAA/NESDIS GOES CONUS GeoColor · partial southern Canada")
+        self.image_ui("severe", "US severe outlook & CAPE", "SPC categorical outlooks and Southern Plains MLCAPE")
+        self.image_ui("model", "US forecast ingredients", "US regional GFS view · selected run and field · NSF Unidata THREDDS")
+        self.image_ui("hrrr", "US HRRR storm forecast", "NCEP HRRR simulated reflectivity · forecast, not observed radar")
+        self.tabs.connect("switch-page", self.switch_page)
 
         self.status = label("Ready · For urgent decisions, use official warnings and local instructions")
         outer.pack_start(self.status, False, False, 0)
         self.window.show_all()
+        self.update_country_labels()
         self.setup_indicator()
         GLib.timeout_add(200, self.refresh)
         GLib.timeout_add(500, self.refresh_alert_count)
@@ -132,7 +136,7 @@ class App:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         page.set_border_width(8)
         self.tabs.append_page(page, Gtk.Label(label="Observations"))
-        self.country = choice(("US", "CA"), self.saved.get("country", "US"), self.location_edited)
+        self.country = choice(("US", "CA", "UK"), self.saved.get("country", "US"), self.location_edited)
         self.postal = Gtk.Entry()
         self.postal.set_width_chars(12)
         self.postal.set_text(self.saved.get("postal_code", ""))
@@ -145,7 +149,8 @@ class App:
         self.street.set_text(self.saved.get("street", ""))
         self.street.connect("changed", lambda _widget: self.location_edited())
         self.street.connect("activate", lambda _widget: self.set_location())
-        page.pack_start(row(label("Street address (optional):"), self.street, label("Approximate geocode")), False, False, 0)
+        page.pack_start(row(label("Street address (US/CA optional; UK unavailable):"), self.street,
+                            label("Approximate geocode")), False, False, 0)
         self.station = Gtk.Entry()
         self.station.set_width_chars(8)
         self.station.set_text(self.saved.get("station", "KDTW"))
@@ -153,9 +158,10 @@ class App:
         self.state = Gtk.Entry()
         self.state.set_width_chars(4)
         self.state.set_text("MI")
+        self.state_alert_button = button("Load alerts", self.load_alerts)
         page.pack_start(row(label("ICAO station:"), self.station, button("Load station", self.load_station),
                             button("View nearest radar", self.open_selected_radar),
-                            label("US state alerts:"), self.state, button("Load alerts", self.load_alerts)), False, False, 0)
+                            label("US state alerts:"), self.state, self.state_alert_button), False, False, 0)
         self.monitor = Gtk.CheckButton(label="Monitor official warnings and watches at postal area")
         self.monitor.set_active(bool(self.saved.get("monitor_enabled") and self.saved.get("postal_code")))
         self.monitor.connect("toggled", self.toggle_monitor)
@@ -193,7 +199,8 @@ class App:
         briefing_box.pack_start(self.local_winter_label, False, False, 0)
         self.hail_label = label("MRMS MESH hail estimate: select Check hail for an on-demand reading")
         self.hail_label.set_line_wrap(True)
-        briefing_box.pack_start(row(button("Check hail near point", self.check_hail), self.hail_label), False, False, 0)
+        self.hail_button = button("Check hail near point", self.check_hail)
+        briefing_box.pack_start(row(self.hail_button, self.hail_label), False, False, 0)
         briefing.add(briefing_box)
         page.pack_start(briefing, False, False, 0)
 
@@ -213,7 +220,7 @@ class App:
         self.details = Gtk.TextView()
         self.details.set_editable(False)
         self.details.set_wrap_mode(Gtk.WrapMode.WORD)
-        self.details.get_buffer().set_text("Select an observation or load a station. METAR and TAF from NOAA Aviation Weather Center. Alerts from NWS.")
+        self.details.get_buffer().set_text("Select an observation or load a station. Global METAR and TAF from NOAA Aviation Weather Center; US state alerts from NWS.")
         detail_scroll = Gtk.ScrolledWindow()
         detail_scroll.set_size_request(-1, 90)
         detail_scroll.add(self.details)
@@ -224,7 +231,10 @@ class App:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         page.set_border_width(8)
         self.tabs.append_page(page, Gtk.Label(label=title))
-        page.pack_start(label(caption), False, False, 0)
+        caption_label = label(caption)
+        if key == "radar":
+            self.radar_caption = caption_label
+        page.pack_start(caption_label, False, False, 0)
         if key in ("severe", "hrrr"):
             guidance = label("Loading local SPC outlook for KLAN…")
             guidance.set_line_wrap(True)
@@ -254,7 +264,7 @@ class App:
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         page.pack_start(controls, False, False, 0)
         if key == "radar":
-            self.radar_product = choice(("National reflectivity", *radar.PRODUCTS, *level3.PRODUCTS,
+            self.radar_product = choice(("National reflectivity", uk.RADAR_PRODUCT, *radar.PRODUCTS, *level3.PRODUCTS,
                                          "MRMS hail swath (30 min)"), "Digital reflectivity", self.refresh)
             self.radar_site = choice(tuple(self.radar_sites), "GRR · Grand Rapids", self.radar_site_changed)
             controls.pack_start(self.radar_product, False, False, 0)
@@ -356,14 +366,27 @@ class App:
 
     def refresh(self):
         tab = self.tabs.get_current_page()
+        if not self.country_tab_available(tab):
+            return False
         if tab == 0:
-            stations = tuple(dict.fromkeys((self.valid_station(), *data.STATIONS)))
-            self.submit("observations", lambda: data.metars(stations), self.show_observations)
+            country = self.country.get_active_text()
+            stations = tuple(dict.fromkeys((self.valid_station(), *data.stations_for_country(country))))
+            self.submit("observations", lambda: (country, data.metars(stations)), self.show_country_observations)
             self.refresh_station_trend()
             self.refresh_guidance()
         elif tab == 1:
             product = self.radar_product.get_active_text()
-            if product == "National reflectivity":
+            if product == uk.RADAR_PRODUCT:
+                self.radar_field = None
+                _place, lat, lon, _country = self.guidance_point
+                center = self.radar_center or (lat, lon)
+                boundaries = self.radar_boundaries.get_active()
+                token = f"uk:{center}:{self.radar_zoom}:{boundaries}"
+                self.begin_image_request("radar", token)
+                zoom = self.radar_zoom
+                self.submit("site-radar", lambda: uk.radar_map(lat, lon, zoom, center, boundaries),
+                            lambda result: self.show_product("radar", token, result, "Decoded"))
+            elif product == "National reflectivity":
                 self.radar_field = None
                 self.load_image("radar", data.RADAR_URL)
             else:
@@ -428,20 +451,25 @@ class App:
                 item.set_text(f"Loading local SPC outlook for {place}…" if country == "US"
                               else "SPC severe outlooks cover the contiguous US")
             self.forecast_label.set_text("Loading local NWS forecast…" if country == "US"
+                                         else "UK point forecast is not integrated; use Official warnings for Met Office guidance" if country == "UK"
                                          else "NWS point forecasts cover the contiguous US")
             self.local_forecast_label.set_text("Loading local NWS forecast…" if country == "US"
+                                               else "UK point forecast is not integrated; use Official warnings for Met Office guidance" if country == "UK"
                                                else "NWS point forecasts cover the contiguous US")
             self.local_hourly_label.set_text("Loading local NWS hourly forecast…" if country == "US"
                                              else "NWS hourly forecasts cover the contiguous US")
             self.local_winter_label.set_text("Loading NWS snow, ice, and gust forecast…" if country == "US"
                                              else "NWS winter forecast grid covers the contiguous US")
             self.local_alert_label.set_text("Local official warnings and watches loading…")
-            self.hail_label.set_text("MRMS MESH hail estimate: select Check hail for this point")
+            self.hail_label.set_text("MRMS MESH hail estimate: select Check hail for this point" if country == "US"
+                                     else "MRMS hail estimate is available for the contiguous US only")
             if self.tabs.get_current_page() in (0, 3, 5):
                 self.refresh_guidance()
 
     def refresh_guidance(self):
         place, lat, lon, country = self.guidance_point
+        if country != self.country.get_active_text():
+            return
         target = self.guidance_point
         self.refresh_local_alert_summary()
         if country != "US":
@@ -485,7 +513,7 @@ class App:
 
     def show_spc_guidance(self, result):
         target, outlook = result
-        if target != self.guidance_point:
+        if target != self.guidance_point or target[3] != self.country.get_active_text():
             self.refresh_guidance()
             return
         self.guidance_last_fetch["spc"] = datetime.now(timezone.utc)
@@ -494,7 +522,7 @@ class App:
 
     def show_nws_forecast(self, result):
         target, mode, forecast = result
-        if target != self.guidance_point or mode != self.unit_mode:
+        if target != self.guidance_point or target[3] != self.country.get_active_text() or mode != self.unit_mode:
             self.refresh_guidance()
             return
         self.guidance_last_fetch["nws"] = datetime.now(timezone.utc)
@@ -503,7 +531,7 @@ class App:
 
     def show_hourly_forecast(self, result):
         target, mode, forecast = result
-        if target != self.guidance_point or mode != self.unit_mode:
+        if target != self.guidance_point or target[3] != self.country.get_active_text() or mode != self.unit_mode:
             self.refresh_guidance()
             return
         self.guidance_last_fetch["hourly"] = datetime.now(timezone.utc)
@@ -511,7 +539,7 @@ class App:
 
     def show_winter_forecast(self, result):
         target, mode, forecast = result
-        if target != self.guidance_point or mode != self.unit_mode:
+        if target != self.guidance_point or target[3] != self.country.get_active_text() or mode != self.unit_mode:
             self.refresh_guidance()
             return
         self.guidance_last_fetch["winter"] = datetime.now(timezone.utc)
@@ -529,28 +557,32 @@ class App:
 
     def show_hail(self, result):
         target, mode, summary = result
-        if target == self.guidance_point and mode == self.unit_mode:
+        if target == self.guidance_point and target[3] == self.country.get_active_text() and mode == self.unit_mode:
             self.hail_label.set_text(summary)
 
     def refresh_local_alert_summary(self):
         target = self.guidance_point
         _place, lat, lon, country = target
+        if country != self.country.get_active_text():
+            return
         now = datetime.now(timezone.utc)
         if "alerts" in self.guidance_last_fetch and now - self.guidance_last_fetch["alerts"] < timedelta(minutes=5):
             return
-        action = data.point_alerts if country == "US" else data.canadian_point_alerts
+        action = data.point_alerts if country == "US" else uk.point_alerts if country == "UK" else data.canadian_point_alerts
         self.submit("local-alert-summary", lambda: (target, action(lat, lon)), self.show_local_alert_summary)
 
     def show_local_alert_summary(self, result):
         target, alerts = result
-        if target != self.guidance_point:
+        if target != self.guidance_point or target[3] != self.country.get_active_text():
             return
         self.guidance_last_fetch["alerts"] = datetime.now(timezone.utc)
         warnings = [item for item in alerts if item.level == "warning"]
         watches = [item for item in alerts if item.level == "watch"]
         advisories = [item for item in alerts if item.level == "advisory"]
-        summary = (f"Official local alerts: {len(warnings)} warning(s), {len(watches)} watch(es), "
-                   f"{len(advisories)} advisories")
+        summary = ((f"Met Office Weather Warnings: {len(warnings)} active amber/red, {len(watches)} active yellow, "
+                    f"{len(advisories)} upcoming") if target[3] == "UK" else
+                   (f"Official local alerts: {len(warnings)} warning(s), {len(watches)} watch(es), "
+                    f"{len(advisories)} advisories"))
         if warnings or watches or advisories:
             summary += " · " + (warnings or watches or advisories)[0].headline[:130]
         self.local_alert_label.set_text(summary)
@@ -589,7 +621,10 @@ class App:
         start_x, start_y = self.radar_drag
         self.radar_drag = None
         site = self.radar_site.get_active_text()
-        west, south, east, north = map(float, radar._bbox(site, self.radar_sites, self.radar_zoom, self.radar_center).split(","))
+        bounds = (uk.bbox(self.guidance_point[1], self.guidance_point[2], self.radar_zoom, self.radar_center)
+                  if self.radar_product.get_active_text() == uk.RADAR_PRODUCT else
+                  radar._bbox(site, self.radar_sites, self.radar_zoom, self.radar_center))
+        west, south, east, north = map(float, bounds.split(","))
         width = max(1, self.image_targets["radar"].get_allocated_width())
         height = max(1, self.image_targets["radar"].get_allocated_height())
         dx, dy = event.x - start_x, event.y - start_y
@@ -632,6 +667,12 @@ class App:
             self.refresh()
 
     def set_nearest_radar(self, lat: float, lon: float):
+        if self.guidance_point[3] == "UK":
+            self.radar_center = (lat, lon)
+            self.radar_product.set_active(0)
+            if self.tabs.get_current_page() == 1:
+                self.refresh()
+            return
         site = radar.nearest_site(lat, lon, self.radar_sites)
         self.setting_nearest_radar = True
         if self.radar_site.get_active_text() != site:
@@ -644,6 +685,8 @@ class App:
             self.refresh()
 
     def load_radar_catalog(self):
+        if self.country.get_active_text() == "UK":
+            return False
         self.submit("radar-catalog", radar.available_sites, self.accept_radar_catalog)
         return False
 
@@ -651,6 +694,7 @@ class App:
         selected = self.radar_site.get_active_text()
         selected_id = selected.split(" · ")[0] if selected else "GRR"
         self.radar_sites = sites
+        self.radar_catalog_loaded = True
         self.updating_radar_catalog = True
         self.radar_site.remove_all()
         active = 0
@@ -660,7 +704,8 @@ class App:
                 active = index
         self.radar_site.set_active(active)
         self.updating_radar_catalog = False
-        self.status.set_text(f"Loaded {len(sites)} NWS radar sites")
+        if self.country.get_active_text() != "UK":
+            self.status.set_text(f"Loaded {len(sites)} NWS radar sites")
         if self.tabs.get_current_page() == 1:
             self.refresh()
 
@@ -710,6 +755,14 @@ class App:
             temperature = units.temperature(current.temp_c, self.unit_mode) if current.temp_c is not None else "temperature unavailable"
             self.local_current_label.set_text(f"{current.station} · {temperature} · {current.conditions} · observed {current.observed}")
 
+    def show_country_observations(self, result):
+        country, rows = result
+        if country != self.country.get_active_text():
+            if self.tabs.get_current_page() == 0:
+                GLib.idle_add(self.refresh)
+            return
+        self.show_observations(rows)
+
     def select_station(self, selection):
         model_store, iterator = selection.get_selected()
         if iterator is not None:
@@ -717,13 +770,15 @@ class App:
             if item:
                 self.station.set_text(item.station)
                 self.set_details(f"{item.name} · {item.observed}\n\n{item.raw}")
-                if item.lat is not None and item.lon is not None:
-                    self.set_guidance_point(item.station, item.lat, item.lon)
+                country = self.country.get_active_text()
+                if item.lat is not None and item.lon is not None and data.station_matches_country(item.station, country):
+                    self.set_guidance_point(item.station, item.lat, item.lon, country)
                     self.set_nearest_radar(item.lat, item.lon)
 
     def open_selected_radar(self):
         item = self.rows.get(self.station.get_text().strip().upper())
-        if item and item.lat is not None and item.lon is not None:
+        if (item and item.lat is not None and item.lon is not None and
+                data.station_matches_country(item.station, self.country.get_active_text())):
             self.set_nearest_radar(item.lat, item.lon)
             self.tabs.set_current_page(1)
         elif self.postal_location:
@@ -757,12 +812,15 @@ class App:
             saved["station"] = item.station
             preferences.save(saved)
             self.saved["station"] = item.station
-            if item.lat is not None and item.lon is not None:
-                self.set_guidance_point(item.station, item.lat, item.lon)
+            country = self.country.get_active_text()
+            if item.lat is not None and item.lon is not None and data.station_matches_country(item.station, country):
+                self.set_guidance_point(item.station, item.lat, item.lon, country)
                 self.set_nearest_radar(item.lat, item.lon)
         self.set_details((f"{rows[0].name} · {rows[0].observed}\n\n{rows[0].raw}\n\nFORECAST\n" if rows else "No observation.\n\n") + forecast)
 
     def load_alerts(self):
+        if self.country.get_active_text() != "US":
+            return
         state = self.state.get_text().strip().upper()
         self.tabs.set_current_page(0)
         self.submit("alerts", lambda: data.alerts(state), lambda items: self.show_alerts(state, items))
@@ -774,14 +832,19 @@ class App:
             else "No active NWS alerts returned for this state.")
 
     def refresh_alert_count(self):
+        if self.country.get_active_text() != "US":
+            return False
         state = self.state.get_text().strip().upper()
         if len(state) == 2 and state.isascii() and state.isalpha():
             self.submit("alert-count", lambda: data.alerts(state),
-                        lambda items: self.alert_button.set_label(f"NWS {state} alerts: {len(items)}"))
+                        lambda items: self.alert_button.set_label(f"NWS {state} alerts: {len(items)}")
+                        if self.country.get_active_text() == "US" and self.state.get_text().strip().upper() == state else None)
         return False
 
     def open_official(self):
-        webbrowser.open("https://weather.gc.ca/" if self.country.get_active_text() == "CA" else "https://www.weather.gov/")
+        country = self.country.get_active_text()
+        webbrowser.open("https://weather.metoffice.gov.uk/warnings-and-advice/uk-warnings" if country == "UK" else
+                        "https://weather.gc.ca/" if country == "CA" else "https://www.weather.gov/")
 
     def set_location(self):
         try:
@@ -795,6 +858,7 @@ class App:
         return False
 
     def location_edited(self):
+        self.update_country_labels()
         if self.setting_postal:
             return
         if self.postal_location is not None:
@@ -806,6 +870,90 @@ class App:
                               "monitor_enabled": False, "units": self.unit_mode})
             self.monitor.set_active(False)
             self.point_status.set_text("Set the new ZIP or postal code to resume local weather and alerts")
+            self.update_country_labels()
+
+    def update_country_labels(self):
+        country = self.country.get_active_text()
+        prior = getattr(self, "country_for_controls", None)
+        self.country_for_controls = country
+        if country == "UK":
+            self.source_label.set_text("CAVE PORTABLE · MET OFFICE UK WEATHER")
+            self.radar_caption.set_text("Met Office UK rain-rate composite · 15-minute scans · no Doppler velocity or correlation product")
+            if hasattr(self, "radar_site"):
+                self.radar_site.hide()
+        else:
+            self.source_label.set_text("CAVE PORTABLE · NOAA / NWS / SPC" if country == "US"
+                                       else "CAVE PORTABLE · ECCC / NOAA")
+            self.radar_caption.set_text("Decoded NOAA Level III radar at the selected site · optional national composite" if country == "US"
+                                        else "US NEXRAD border-area coverage only · Canadian national radar unavailable")
+            if hasattr(self, "radar_site"):
+                self.radar_site.show()
+        if hasattr(self, "street"):
+            if country == "UK" and self.street.get_text():
+                self.street.set_text("")
+            self.street.set_sensitive(country != "UK")
+        if hasattr(self, "state"):
+            self.state.set_sensitive(country == "US")
+            self.state_alert_button.set_sensitive(country == "US")
+            self.alert_button.set_sensitive(country == "US")
+            self.alert_button.set_label("NWS state alerts" if country == "US" else "NWS state alerts (US only)")
+            self.hail_button.set_sensitive(country == "US")
+            self.radar_timeline.set_sensitive(country != "UK")
+            self.radar_tilt.set_sensitive(country != "UK")
+        if prior != country and hasattr(self, "radar_product"):
+            self.image_requests["radar"] = "country-change"
+            self.image_targets["radar"].clear()
+            self.image_stamps["radar"].set_text("Select a local postal code for radar" if country == "UK"
+                                                 else "Select a radar product")
+            products = ((uk.RADAR_PRODUCT,) if country == "UK" else
+                        (*radar.PRODUCTS, *level3.PRODUCTS) if country == "CA" else
+                        ("National reflectivity", *radar.PRODUCTS, *level3.PRODUCTS, "MRMS hail swath (30 min)"))
+            self.radar_product.remove_all()
+            for product in products:
+                self.radar_product.append_text(product)
+            self.radar_product.set_active(products.index("Digital reflectivity") if country != "UK" else 0)
+            if country != "US" and self.station.get_text().strip().upper() in ("KDTW", "KLAN", "EGLL", "CYYZ"):
+                self.station.set_text("EGLL" if country == "UK" else "CYYZ")
+            elif country == "US" and self.station.get_text().strip().upper() in ("EGLL", "CYYZ"):
+                self.station.set_text("KDTW")
+            self.radar_center = None
+            if prior == "UK" and country != "UK" and not self.radar_catalog_loaded:
+                GLib.idle_add(self.load_radar_catalog)
+        if hasattr(self, "tabs"):
+            for index in range(self.tabs.get_n_pages()):
+                page = self.tabs.get_nth_page(index)
+                enabled = self.country_tab_available(index)
+                page.set_sensitive(enabled)
+                self.tabs.get_tab_label(page).set_sensitive(enabled)
+            if not self.country_tab_available(self.tabs.get_current_page()):
+                self.tabs.set_current_page(0)
+        if country != self.guidance_point[3] and hasattr(self, "local_forecast_label"):
+            self.local_current_label.set_text("Set a local postal code to load nearby airport weather")
+            self.local_alert_label.set_text("Set a local postal code to load official warning areas")
+            for item in self.guidance_labels.values():
+                item.set_text("SPC outlooks cover the US only" if country != "US" else "Set a US ZIP code to load local SPC guidance")
+            self.local_forecast_label.set_text("UK point forecast not integrated; open official Met Office guidance" if country == "UK"
+                                               else "Set a local postal code to load forecast guidance")
+            self.local_hourly_label.set_text("NWS hourly forecast is US only" if country != "US" else "Set a US ZIP code for hourly forecast")
+            self.local_winter_label.set_text("UK winter accumulation forecast not integrated" if country == "UK"
+                                             else "Set a local postal code for winter guidance")
+            self.hail_label.set_text("MRMS hail estimate is US only" if country != "US" else "Set a US ZIP code for hail estimate")
+
+    def country_tab_available(self, index: int) -> bool:
+        country = self.country.get_active_text()
+        if index in (3, 4, 5):
+            return country == "US"
+        if index == 2:
+            return country != "UK"
+        if index == 1 and country == "UK":
+            return self.postal_location is not None and self.postal_location.country == "UK"
+        return True
+
+    def switch_page(self, _notebook, _page, index):
+        if not self.country_tab_available(index):
+            GLib.idle_add(self.tabs.set_current_page, 0)
+            return
+        GLib.idle_add(self.refresh)
 
     def valid_station(self):
         try:
@@ -845,6 +993,7 @@ class App:
         if (resolved.country, resolved.code, resolved.street) != (*current, self.street.get_text().strip()):
             return
         self.postal_location = resolved
+        self.update_country_labels()
         self.set_guidance_point(resolved.locality or resolved.code, resolved.lat, resolved.lon, resolved.country)
         self.set_nearest_radar(resolved.lat, resolved.lon)
         self.latest_local_weather = None
@@ -922,7 +1071,7 @@ class App:
     def refresh_point_alerts(self):
         if self.monitor.get_active() and self.postal_location:
             target = self.postal_location
-            action = data.point_alerts if target.country == "US" else data.canadian_point_alerts
+            action = data.point_alerts if target.country == "US" else uk.point_alerts if target.country == "UK" else data.canadian_point_alerts
             self.submit("point-alerts", lambda: (target, action(target.lat, target.lon)), self.show_point_alerts)
 
     def show_point_alerts(self, result):
@@ -933,7 +1082,10 @@ class App:
         watches = [item for item in alerts if item.level == "watch"]
         advisories = [item for item in alerts if item.level == "advisory"]
         self.set_indicator_level("warning" if warnings else "watch" if watches else "normal")
-        self.point_status.set_text(f"{target.code} centroid · {len(warnings)} official warning(s), "
+        self.point_status.set_text((f"{target.code} postcode centroid · Met Office Weather Warnings: "
+                                    f"{len(warnings)} amber/red, {len(watches)} yellow, {len(advisories)} upcoming")
+                                   if target.country == "UK" else
+                                   f"{target.code} centroid · {len(warnings)} official warning(s), "
                                    f"{len(watches)} watch(es), {len(advisories)} advisories")
         fresh = [item for item in alerts if item.level in ("warning", "watch")
                  and item.identifier not in self.monitor_seen]

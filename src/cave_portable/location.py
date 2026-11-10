@@ -1,4 +1,4 @@
-"""Explicit US ZIP and Canadian postal locations; no IP location inference."""
+"""Explicit US, Canadian, and UK postal locations; no IP location inference."""
 
 from __future__ import annotations
 
@@ -25,7 +25,8 @@ class PostalLocation:
     def label(self) -> str:
         if self.street:
             return f"{self.street}, {self.code} (geocoded address; approximate)"
-        suffix = " (FSA centroid; approximate)" if self.approximate else " (ZIP centroid)"
+        suffix = (" (postcode centroid; approximate)" if self.country == "UK" else
+                  " (FSA centroid; approximate)" if self.approximate else " (ZIP centroid)")
         return f"{self.code} · {self.locality}, {self.region}{suffix}"
 
 
@@ -41,7 +42,12 @@ def validate_postal(country: str, code: str) -> tuple[str, str]:
         if not re.fullmatch(r"[ABCEGHJ-NPRSTVXY][0-9][ABCEGHJ-NPRSTV-Z][0-9][ABCEGHJ-NPRSTV-Z][0-9]", code):
             raise data.DataError("Enter a full six-character Canadian postal code, such as K1A 0B1")
         return country, code[:3] + " " + code[3:]
-    raise data.DataError("Choose United States or Canada")
+    if country in ("UK", "GB"):
+        code = re.sub(r"\s+", "", code)
+        if not re.fullmatch(r"(?:GIR0AA|(?:[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}))", code):
+            raise data.DataError("Enter a full UK postcode, such as SW1A 2AA")
+        return "UK", code[:-3] + " " + code[-3:]
+    raise data.DataError("Choose United States, Canada, or United Kingdom")
 
 
 def resolve(country: str, code: str, street: str = "") -> PostalLocation:
@@ -49,6 +55,21 @@ def resolve(country: str, code: str, street: str = "") -> PostalLocation:
     street = street.strip()
     if street and (len(street) > 120 or not re.fullmatch(r"[\w .,'#/-]+", street, re.UNICODE)):
         raise data.DataError("Enter a street address of at most 120 ordinary characters")
+    if country == "UK":
+        if street:
+            raise data.DataError("UK street-address lookup is not yet available; clear the street field")
+        payload = data._json(f"https://api.postcodes.io/postcodes/{code.replace(' ', '')}")
+        result = payload.get("result") if isinstance(payload, dict) else None
+        if not isinstance(result, dict) or not result:
+            raise data.DataError("UK postcode was not found")
+        try:
+            lat, lon = float(result["latitude"]), float(result["longitude"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise data.DataError("UK postcode service returned invalid coordinates") from exc
+        if not (math.isfinite(lat) and math.isfinite(lon) and 49 <= lat <= 61 and -11 <= lon <= 3):
+            raise data.DataError("UK postcode service returned coordinates outside the UK")
+        return PostalLocation("UK", code, str(result.get("admin_district") or "Postcode area")[:80],
+                              str(result.get("country") or "United Kingdom")[:40], lat, lon, True)
     query = code[:5] if country == "US" else code[:3]
     payload = data._json(f"https://api.zippopotam.us/{country.lower()}/{query}")
     places = payload.get("places") if isinstance(payload, dict) else None

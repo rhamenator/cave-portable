@@ -4,7 +4,7 @@ See the [native-code assessment](PORTING_ASSESSMENT.md) for measured performance
 
 ## Current release
 
-0.4.7 adds a UK Hybrid display profile alongside the saved US, Metric, and existing Hybrid choices in both desktop interfaces. It includes the 0.4.5 NOAA/ECCC winter alert boundaries and forecast briefing. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
+0.5.0 adds full UK postcode lookup, a decoded Met Office rain-rate composite, local Met Office warning polygons, and nearby airport observations. The UK feed in this app is more limited and slower than its US NOAA radar coverage: no UK velocity/CC/hail fields or UK point/winter forecast yet. It includes earlier UK Hybrid units and NOAA/ECCC winter work. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 The source branch also contains [NOAA observational replay](NOAA_REPLAY.md) tools for historical case studies. Locally generated severe-weather prediction remains a later research question.
 
@@ -18,7 +18,7 @@ The source branch's live radar workspace now anchors reflectivity, velocity, and
 4. Soundings and measured time series for situational awareness.
 5. Optional read-only EDEX data integration, keeping the lightweight standalone mode.
 6. Reproducible packaged installers and measured startup, memory, download, and idle CPU budgets on Ubuntu, Fedora, Windows, and macOS.
-7. Consider Europe only after verifying postal geocoding, current observation and radar sources, and authoritative warning feeds for each supported country.
+7. Expand beyond the UK in Europe only after verifying postal geocoding, current observations, radar sources, and authoritative warning feeds for each country. For the UK, add a point/winter forecast source and assess warning-feed latency and licence requirements before broadening its role.
 8. Add optional AMBER and other public-safety categories only after acquiring and validating live all-hazards sources. The current NWS and ECCC weather feeds do not represent all US EAS/WEA or Canadian Alert Ready messages. Keep AMBER desktop notifications off by default when implemented. A mobile app is a later possibility and is outside this desktop release.
 9. Winter-storm validation: acquire archived as-issued NWS forecast grids and historical NWS/ECCC alert versions, then score accumulation error and warning lead time against observed winter events. The [December 2022 Michigan replay](NOAA_REPLAY.md#december-2022-michigan-winter-case) checks radar and airport observation availability but cannot score those forecasts or alerts. The US grid readout is a largest individual forecast period, not a storm total or confidence range. NOAA forecast-zone mapping still covers only the selected radar's US state; the Canadian briefing uses the nearest available ECCC city forecast, not a forecast interpolated to the saved point.
 
