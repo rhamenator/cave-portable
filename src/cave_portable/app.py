@@ -229,7 +229,7 @@ class App:
         self.autostart = tk.BooleanVar(value=preferences.is_autostart_enabled())
         ttk.Checkbutton(options, text="Start at login", variable=self.autostart, command=self._toggle_autostart).pack(side="left", padx=8)
         ttk.Label(options, text="Units:").pack(side="left", padx=(12, 3))
-        unit_picker = ttk.Combobox(options, textvariable=self.unit_mode, values=units.MODES, state="readonly", width=8)
+        unit_picker = ttk.Combobox(options, textvariable=self.unit_mode, values=units.MODES, state="readonly", width=10)
         unit_picker.pack(side="left")
         unit_picker.bind("<<ComboboxSelected>>", self._units_changed)
         ttk.Label(self.observations_tab, textvariable=self.point_status, foreground=MUTED).pack(fill="x", pady=(0, 8))

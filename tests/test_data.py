@@ -104,6 +104,18 @@ class DataTests(unittest.TestCase):
         self.assertIn("7°C", data.hourly_forecast(42.77, -84.59, "Metric"))
         self.assertTrue(fetch.call_args.args[0].endswith("?units=si"))
 
+    @patch.object(data, "_json")
+    def test_uk_hybrid_converts_nws_si_forecast_wind(self, fetch):
+        now = datetime.now(timezone.utc)
+        point = {"properties": {"forecast": "https://api.weather.gov/gridpoints/GRR/78,41/forecast"}}
+        forecast = {"properties": {"updateTime": now.isoformat(), "periods": [{
+            "name": "Today", "detailedForecast": "High near 7. Wind 10 to 15 km/h, gusting to 30 km/h."}]}}
+        fetch.side_effect = [point, forecast]
+        result = data.point_forecast(42.77, -84.59, "UK Hybrid")
+        self.assertIn("6 to 9 mph", result)
+        self.assertIn("19 mph", result)
+        self.assertTrue(fetch.call_args.args[0].endswith("?units=si"))
+
     def test_winter_weather_codes_and_mixed_duration(self):
         now = datetime(2026, 11, 10, 6, tzinfo=timezone.utc)
         field = {"values": [{"validTime": "2026-11-10T05:00:00+00:00/P1DT13H",
