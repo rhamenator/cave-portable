@@ -23,7 +23,7 @@ try:
 except (ImportError, ValueError):
     AyatanaAppIndicator3 = None
 
-from . import __version__, data, hrrr, level3, location, model, mrms, preferences, radar, spc
+from . import __version__, data, hrrr, level3, location, model, mrms, preferences, radar, spc, units
 
 
 def label(text: str) -> Gtk.Label:
@@ -69,7 +69,9 @@ class App:
         self.monitor_seen: set[str] = set()
         self.mini: Gtk.Window | None = None
         self.latest_local_weather: str | None = None
+        self.local_observation: data.Observation | None = None
         self.saved = preferences.load()
+        self.unit_mode = self.saved.get("units", units.DEFAULT)
         self.radar_sites = dict(radar.SITES)
         self.radar_zoom = 1
         self.radar_center: tuple[float, float] | None = None
@@ -160,7 +162,9 @@ class App:
         self.autostart = Gtk.CheckButton(label="Start at login")
         self.autostart.set_active(preferences.is_autostart_enabled())
         self.autostart.connect("toggled", self.toggle_autostart)
-        page.pack_start(row(self.monitor, button("Mini weather window", self.show_mini), self.autostart), False, False, 0)
+        self.unit_choice = choice(units.MODES, self.unit_mode, self.units_changed)
+        page.pack_start(row(self.monitor, button("Mini weather window", self.show_mini), self.autostart,
+                            label("Units:"), self.unit_choice), False, False, 0)
         self.point_status = label("Set a ZIP or postal code for local weather and alerts")
         page.pack_start(self.point_status, False, False, 0)
         briefing = Gtk.Expander(label="Selected location briefing · official sources")
@@ -195,7 +199,7 @@ class App:
 
         self.store = Gtk.ListStore(str, str, str, str, str, str, str)
         self.table = Gtk.TreeView(model=self.store)
-        for idx, title in enumerate(("ICAO", "Location", "Observed", "°C", "Wind", "Vis. mi", "Flight")):
+        for idx, title in enumerate(("ICAO", "Location", "Observed", "Temp", "Wind", "Vis.", "Flight")):
             column = Gtk.TreeViewColumn(title, Gtk.CellRendererText(), text=idx)
             column.set_resizable(True)
             column.set_min_width(45)
@@ -370,18 +374,18 @@ class App:
                 frame = self.radar_frame
                 boundaries = self.radar_boundaries.get_active()
                 tilt = self.radar_tilt.get_active()
-                token = f"{site}:{product}:{self.radar_zoom}:{center}:{frame}:{boundaries}:{tilt}"
+                token = f"{site}:{product}:{self.radar_zoom}:{center}:{frame}:{boundaries}:{tilt}:{self.unit_mode}"
                 self.begin_image_request("radar", token)
                 sites, zoom = self.radar_sites, self.radar_zoom
                 if product == "MRMS hail swath (30 min)":
                     self.radar_field = None
-                    self.submit("site-radar", lambda: mrms.swath_map(site, sites, zoom, center),
+                    self.submit("site-radar", lambda: mrms.swath_map(site, sites, zoom, center, unit_mode=self.unit_mode),
                                 lambda result: self.show_product("radar", token, result, ""))
                 elif product in level3.PRODUCTS:
                     alert_point = self.guidance_point[1:3]
                     include_us_alerts = self.guidance_point[3] == "US"
                     self.submit("site-radar", lambda: level3.field_map(site, product, sites, zoom, center, frame, boundaries, tilt,
-                                                                       alert_point, include_us_alerts),
+                                                                       alert_point, include_us_alerts, self.unit_mode),
                                 lambda result: self.show_level3(token, result))
                 else:
                     self.radar_field = None
@@ -438,23 +442,28 @@ class App:
 
     def refresh_guidance(self):
         place, lat, lon, country = self.guidance_point
+        target = self.guidance_point
         self.refresh_local_alert_summary()
         if country != "US":
             now = datetime.now(timezone.utc)
             if (country == "CA" and ("winter" not in self.guidance_last_fetch
                     or now - self.guidance_last_fetch["winter"] >= timedelta(minutes=10))):
-                self.submit("winter-forecast", lambda: (target, data.canadian_winter_forecast(lat, lon)), self.show_winter_forecast)
+                mode = self.unit_mode
+                self.submit("winter-forecast", lambda: (target, mode, data.canadian_winter_forecast(lat, lon)), self.show_winter_forecast)
             return
         target = self.guidance_point
         now = datetime.now(timezone.utc)
         if "spc" not in self.guidance_last_fetch or now - self.guidance_last_fetch["spc"] >= timedelta(minutes=10):
             self.submit("spc-guidance", lambda: (target, spc.point_guidance(lat, lon).summary(place)), self.show_spc_guidance)
         if "nws" not in self.guidance_last_fetch or now - self.guidance_last_fetch["nws"] >= timedelta(minutes=10):
-            self.submit("point-forecast", lambda: (target, data.point_forecast(lat, lon)), self.show_nws_forecast)
+            mode = self.unit_mode
+            self.submit("point-forecast", lambda: (target, mode, data.point_forecast(lat, lon, mode)), self.show_nws_forecast)
         if "hourly" not in self.guidance_last_fetch or now - self.guidance_last_fetch["hourly"] >= timedelta(minutes=10):
-            self.submit("hourly-forecast", lambda: (target, data.hourly_forecast(lat, lon)), self.show_hourly_forecast)
+            mode = self.unit_mode
+            self.submit("hourly-forecast", lambda: (target, mode, data.hourly_forecast(lat, lon, mode)), self.show_hourly_forecast)
         if "winter" not in self.guidance_last_fetch or now - self.guidance_last_fetch["winter"] >= timedelta(minutes=10):
-            self.submit("winter-forecast", lambda: (target, data.winter_forecast(lat, lon)), self.show_winter_forecast)
+            mode = self.unit_mode
+            self.submit("winter-forecast", lambda: (target, mode, data.winter_forecast(lat, lon, mode=mode)), self.show_winter_forecast)
 
     def refresh_station_trend(self):
         station = self.valid_station()
@@ -472,7 +481,7 @@ class App:
             return
         self.station_trend_station = station
         self.guidance_last_fetch["station-trend"] = datetime.now(timezone.utc)
-        self.station_trend_label.set_text(trend.summary())
+        self.station_trend_label.set_text(trend.summary(self.unit_mode))
 
     def show_spc_guidance(self, result):
         target, outlook = result
@@ -484,8 +493,8 @@ class App:
             item.set_text(outlook)
 
     def show_nws_forecast(self, result):
-        target, forecast = result
-        if target != self.guidance_point:
+        target, mode, forecast = result
+        if target != self.guidance_point or mode != self.unit_mode:
             self.refresh_guidance()
             return
         self.guidance_last_fetch["nws"] = datetime.now(timezone.utc)
@@ -493,16 +502,16 @@ class App:
         self.local_forecast_label.set_text(forecast)
 
     def show_hourly_forecast(self, result):
-        target, forecast = result
-        if target != self.guidance_point:
+        target, mode, forecast = result
+        if target != self.guidance_point or mode != self.unit_mode:
             self.refresh_guidance()
             return
         self.guidance_last_fetch["hourly"] = datetime.now(timezone.utc)
         self.local_hourly_label.set_text(forecast)
 
     def show_winter_forecast(self, result):
-        target, forecast = result
-        if target != self.guidance_point:
+        target, mode, forecast = result
+        if target != self.guidance_point or mode != self.unit_mode:
             self.refresh_guidance()
             return
         self.guidance_last_fetch["winter"] = datetime.now(timezone.utc)
@@ -515,11 +524,12 @@ class App:
             self.hail_label.set_text("MRMS MESH currently covers the contiguous US")
             return
         self.hail_label.set_text("Loading current NOAA MRMS MESH hail estimate…")
-        self.submit("mrms-hail", lambda: (target, mrms.near_point(lat, lon).summary(place)), self.show_hail)
+        mode = self.unit_mode
+        self.submit("mrms-hail", lambda: (target, mode, mrms.near_point(lat, lon).summary(place, mode)), self.show_hail)
 
     def show_hail(self, result):
-        target, summary = result
-        if target == self.guidance_point:
+        target, mode, summary = result
+        if target == self.guidance_point and mode == self.unit_mode:
             self.hail_label.set_text(summary)
 
     def refresh_local_alert_summary(self):
@@ -691,11 +701,13 @@ class App:
         self.rows = {item.station: item for item in rows}
         for item in sorted(rows, key=lambda item: (item.station != self.valid_station(), item.station)):
             self.store.append((item.station, item.name, item.observed,
-                               f"{item.temp_c:.1f}" if item.temp_c is not None else "—",
-                               item.wind, item.visibility, item.flight_category))
+                               units.temperature(item.temp_c, self.unit_mode),
+                               units.wind(item.wind, self.unit_mode),
+                               units.visibility_display(item.visibility, self.unit_mode),
+                               item.flight_category))
         current = self.rows.get(self.valid_station())
         if current and self.postal_location is None:
-            temperature = f"{current.temp_c:.1f} °C" if current.temp_c is not None else "temperature unavailable"
+            temperature = units.temperature(current.temp_c, self.unit_mode) if current.temp_c is not None else "temperature unavailable"
             self.local_current_label.set_text(f"{current.station} · {temperature} · {current.conditions} · observed {current.observed}")
 
     def select_station(self, selection):
@@ -737,8 +749,9 @@ class App:
             item = rows[0]
             if item.station not in self.rows:
                 self.store.prepend((item.station, item.name, item.observed,
-                                   f"{item.temp_c:.1f}" if item.temp_c is not None else "—",
-                                   item.wind, item.visibility, item.flight_category))
+                                   units.temperature(item.temp_c, self.unit_mode),
+                                   units.wind(item.wind, self.unit_mode),
+                                   units.visibility_display(item.visibility, self.unit_mode), item.flight_category))
             self.rows[item.station] = item
             saved = preferences.load()
             saved["station"] = item.station
@@ -790,7 +803,7 @@ class App:
             self.monitor_seen.clear()
             preferences.save({"station": self.valid_station(), "country": previous.country,
                               "postal_code": previous.code, "street": previous.street,
-                              "monitor_enabled": False})
+                              "monitor_enabled": False, "units": self.unit_mode})
             self.monitor.set_active(False)
             self.point_status.set_text("Set the new ZIP or postal code to resume local weather and alerts")
 
@@ -803,7 +816,26 @@ class App:
     def save_preferences(self):
         preferences.save({"station": self.valid_station(),
                           "country": self.country.get_active_text(), "postal_code": self.postal.get_text(),
-                          "street": self.street.get_text(), "monitor_enabled": self.monitor.get_active()})
+                          "street": self.street.get_text(), "monitor_enabled": self.monitor.get_active(),
+                          "units": self.unit_mode})
+
+    def units_changed(self):
+        self.unit_mode = self.unit_choice.get_active_text()
+        saved = preferences.load()
+        saved["units"] = self.unit_mode
+        preferences.save(saved)
+        self.guidance_last_fetch.clear()
+        if hasattr(self, "rows"):
+            self.show_observations(list(self.rows.values()))
+        if self.postal_location:
+            if self.local_observation is not None:
+                self.show_weather((self.postal_location, self.local_observation))
+            target = self.postal_location
+            self.submit("local-weather", lambda: (target, data.nearby_metar(target.lat, target.lon)), self.show_weather)
+        self.refresh_guidance()
+        self.refresh_station_trend()
+        if self.tabs.get_current_page() == 1:
+            self.refresh()
 
     def accept_location(self, resolved):
         try:
@@ -831,7 +863,8 @@ class App:
         target, observation = result
         if target != self.postal_location:
             return
-        temperature = f"{observation.temp_c:.1f} °C" if observation.temp_c is not None else "Temperature unavailable"
+        self.local_observation = observation
+        temperature = units.temperature(observation.temp_c, self.unit_mode) if observation.temp_c is not None else "Temperature unavailable"
         text = f"{temperature} · {observation.conditions}\nNearby airport {observation.station} · {observation.observed}"
         self.latest_local_weather = text
         self.point_status.set_text(text.replace("\n", " · "))

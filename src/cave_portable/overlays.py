@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 from PIL import Image, ImageDraw
 
-from . import data, spc
+from . import data, spc, units
 
 
 def _rings(geometry: dict) -> list[list[tuple[float, float]]]:
@@ -203,7 +203,8 @@ def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None
          scan_time: datetime | None = None,
          radar_point: tuple[float, float] | None = None,
          include_local_alerts: bool = True,
-         include_canadian_alerts: bool = False) -> tuple[Image.Image, str]:
+         include_canadian_alerts: bool = False,
+         unit_mode: str = units.DEFAULT) -> tuple[Image.Image, str]:
     """Paint source geometries and name missing overlays in the returned status."""
     west, south, east, north = (float(value) for value in bbox.split(","))
     output = image.copy().convert("RGB")
@@ -294,7 +295,8 @@ def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None
         try:
             observation = _nearby_observation(round(lat, 3), round(lon, 3), int(now.timestamp()) // 300)
             notes.append(f"{observation.station} observation {observation.observed}: "
-                         f"{observation.temp_c:.0f} °C, {observation.wind}")
+                         f"{units.temperature(observation.temp_c, unit_mode, 0)}, "
+                         f"{units.wind(observation.wind, unit_mode)}")
             if observation.lat is not None and observation.lon is not None:
                 ox = (observation.lon - west) / (east - west) * image.width
                 oy = (north - observation.lat) / (north - south) * image.height

@@ -80,6 +80,30 @@ class DataTests(unittest.TestCase):
         self.assertIn("gust 40 mph", summary)
         self.assertIn("not a 48 h total", summary)
 
+    @patch.object(data, "_json")
+    def test_winter_grid_metric_and_hybrid_units(self, fetch):
+        now = datetime(2026, 11, 10, 6, tzinfo=timezone.utc)
+        point = {"properties": {"forecastGridData": "https://api.weather.gov/gridpoints/GRR/78,41"}}
+        grid = {"properties": {"updateTime": "2026-11-10T05:00:00+00:00",
+            "snowfallAmount": {"uom": "wmoUnit:mm", "values": [{"validTime": "2026-11-10T06:00:00+00:00/PT6H", "value": 25.4}]},
+            "windGust": {"uom": "wmoUnit:km_h-1", "values": [{"validTime": "2026-11-10T06:00:00+00:00/PT6H", "value": 64}]}}}
+        fetch.side_effect = [point, grid, point, grid]
+        self.assertIn("snow 2.5 cm", data.winter_forecast(42.77, -84.59, now, "Metric"))
+        hybrid = data.winter_forecast(42.77, -84.59, now, "Hybrid")
+        self.assertIn("snow 1.0 in", hybrid)
+        self.assertIn("gust 64 km/h", hybrid)
+
+    @patch.object(data, "_json")
+    def test_nws_hourly_requests_source_units(self, fetch):
+        point = {"properties": {"forecastHourly": "https://api.weather.gov/gridpoints/GRR/78,41/forecast/hourly"}}
+        now = datetime.now(timezone.utc)
+        hourly = {"properties": {"updateTime": now.isoformat(), "periods": [{
+            "startTime": now.isoformat(), "temperature": 7, "temperatureUnit": "C",
+            "shortForecast": "Cloudy"}]}}
+        fetch.side_effect = [point, hourly]
+        self.assertIn("7°C", data.hourly_forecast(42.77, -84.59, "Metric"))
+        self.assertTrue(fetch.call_args.args[0].endswith("?units=si"))
+
     def test_winter_weather_codes_and_mixed_duration(self):
         now = datetime(2026, 11, 10, 6, tzinfo=timezone.utc)
         field = {"values": [{"validTime": "2026-11-10T05:00:00+00:00/P1DT13H",

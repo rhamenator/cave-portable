@@ -12,7 +12,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-USER_AGENT = "CAVE-Portable/0.4.5 (https://github.com/rhamenator/cave-portable)"
+from . import units
+
+USER_AGENT = "CAVE-Portable/0.4.6 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
@@ -62,12 +64,14 @@ class StationTrend:
     altimeter_change_hpa_per_hour: float
     dewpoint_c: float | None
 
-    def summary(self) -> str:
+    def summary(self, mode: str = units.DEFAULT) -> str:
         direction = ("rising" if self.altimeter_change_hpa_per_hour > .2 else
                      "falling" if self.altimeter_change_hpa_per_hour < -.2 else "steady")
-        dewpoint = (f" · dewpoint {self.dewpoint_c:.1f} °C" if self.dewpoint_c is not None else "")
+        dewpoint = (f" · dewpoint {units.temperature(self.dewpoint_c, mode)}" if self.dewpoint_c is not None else "")
+        pressure = (f"{abs(self.altimeter_change_hpa_per_hour) * 0.02952998:.3f} inHg/h"
+                    if mode == "US" else f"{abs(self.altimeter_change_hpa_per_hour):.1f} hPa/h")
         return (f"{self.station} · {self.span_hours:.1f} h altimeter {direction}"
-                f" {abs(self.altimeter_change_hpa_per_hour):.1f} hPa/h ({self.report_count} reports){dewpoint}"
+                f" {pressure} ({self.report_count} reports){dewpoint}"
                 f" · {self.latest:%H:%M UTC} · observation only, not a severe-weather forecast")
 
 
@@ -235,7 +239,7 @@ def taf(station: str) -> str:
     return str(payload[0].get("rawTAF") or "No forecast available")[:5000] if payload else "No forecast available"
 
 
-def point_forecast(lat: float, lon: float) -> str:
+def point_forecast(lat: float, lon: float, mode: str = "US") -> str:
     """Readable NWS point forecast from its current WFO grid mapping."""
     if not (math.isfinite(lat) and math.isfinite(lon) and 24 <= lat <= 50 and -126 <= lon <= -66):
         raise DataError("NWS point forecast covers the contiguous US")
@@ -245,7 +249,7 @@ def point_forecast(lat: float, lon: float) -> str:
     if not isinstance(url, str) or not re.fullmatch(
         r"https://api\.weather\.gov/gridpoints/[A-Z]{3}/\d+,\d+/forecast", url):
         raise DataError("NWS forecast grid URL was invalid")
-    forecast = _json(url)
+    forecast = _json(url + "?units=" + ("us" if mode == "US" else "si"))
     props = forecast.get("properties") if isinstance(forecast, dict) else None
     periods = props.get("periods") if isinstance(props, dict) else None
     if not isinstance(periods, list) or not periods:
@@ -268,7 +272,7 @@ def point_forecast(lat: float, lon: float) -> str:
     return f"NWS point forecast · updated {updated:%d %b %H:%M UTC}\n" + "\n".join(lines)
 
 
-def hourly_forecast(lat: float, lon: float) -> str:
+def hourly_forecast(lat: float, lon: float, mode: str = "US") -> str:
     """Three readable local hours from the current NWS forecast grid."""
     if not (math.isfinite(lat) and math.isfinite(lon) and 24 <= lat <= 50 and -126 <= lon <= -66):
         raise DataError("NWS hourly forecast covers the contiguous US")
@@ -278,7 +282,7 @@ def hourly_forecast(lat: float, lon: float) -> str:
     if not isinstance(url, str) or not re.fullmatch(
         r"https://api\.weather\.gov/gridpoints/[A-Z]{3}/\d+,\d+/forecast/hourly", url):
         raise DataError("NWS hourly forecast grid URL was invalid")
-    forecast = _json(url)
+    forecast = _json(url + "?units=" + ("us" if mode == "US" else "si"))
     props = forecast.get("properties") if isinstance(forecast, dict) else None
     periods = props.get("periods") if isinstance(props, dict) else None
     if not isinstance(periods, list) or not periods:
@@ -363,7 +367,8 @@ def _winter_types(field: dict, now: datetime):
     return [f"{name} from {when:%d %b %H:%M} UTC" for name, when in sorted(found.items(), key=lambda x: x[1])]
 
 
-def winter_forecast(lat: float, lon: float, now: datetime | None = None) -> str:
+def winter_forecast(lat: float, lon: float, now: datetime | None = None,
+                    mode: str = "US") -> str:
     """Source-attributed snow, ice, and gust peaks in NWS forecast grid periods."""
     if not (math.isfinite(lat) and math.isfinite(lon) and 24 <= lat <= 50 and -126 <= lon <= -66):
         raise DataError("NWS winter forecast grid covers the contiguous US")
@@ -383,19 +388,18 @@ def winter_forecast(lat: float, lon: float, now: datetime | None = None) -> str:
         raise DataError("NWS forecast grid update time was unavailable") from exc
     if updated > current + timedelta(minutes=5) or current - updated > timedelta(hours=18):
         raise DataError("NWS forecast grid is stale")
-    specs = (("snowfallAmount", "snow", "wmoUnit:mm", 1 / 25.4, "in"),
-             ("iceAccumulation", "ice", "wmoUnit:mm", 1 / 25.4, "in"),
-             ("windGust", "gust", "wmoUnit:km_h-1", 0.621371, "mph"))
+    specs = (("snowfallAmount", "snow", "wmoUnit:mm", units.snow),
+             ("iceAccumulation", "ice", "wmoUnit:mm", units.ice),
+             ("windGust", "gust", "wmoUnit:km_h-1", units.speed_kmh))
     parts = []
-    for key, label, unit, factor, display_unit in specs:
+    for key, label, unit, formatter in specs:
         field = fields.get(key)
         if not isinstance(field, dict) or field.get("uom") != unit:
             continue
         peak = _grid_peak(field, current)
         if peak is not None:
             value, start, end = peak
-            precision = 1 if label != "gust" else 0
-            parts.append(f"{label} {value * factor:.{precision}f} {display_unit} "
+            parts.append(f"{label} {formatter(value, mode)} "
                          f"({start:%d %b %H:%M}–{end:%d %b %H:%M} UTC)")
     types = _winter_types(fields.get("weather"), current)
     if types:
@@ -453,7 +457,7 @@ def canadian_winter_forecast(lat: float, lon: float, now: datetime | None = None
             lines.append(f"{period}: {summary}")
     if not lines:
         raise DataError("ECCC city forecast had no usable periods")
-    return (f"ECCC forecast for {name} · issued {issued:%d %b %H:%M UTC} · "
+    return (f"ECCC forecast for {name} · issued {issued:%d %b %H:%M UTC} · source wording (metric) · "
             + " · ".join(lines) + " · city forecast, not a point accumulation estimate")
 
 

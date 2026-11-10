@@ -365,7 +365,7 @@ def field_map(site_name: str, product_name: str, sites: dict, zoom: int = 1,
               center: tuple[float, float] | None = None, frame: int = 0,
               include_overlays: bool = True, tilt: int = 0,
               alert_point: tuple[float, float] | None = None,
-              include_us_alerts: bool = True):
+              include_us_alerts: bool = True, unit_mode: str = "Hybrid"):
     from .radar import _bbox
 
     if site_name not in sites or product_name not in PRODUCTS:
@@ -388,6 +388,6 @@ def field_map(site_name: str, product_name: str, sites: dict, zoom: int = 1,
         image, note = overlays.draw(image, bbox, alert_point or center or (field.latitude, field.longitude),
                                     include_local_alerts=include_us_alerts, scan_time=field.time,
                                     radar_point=(field.latitude, field.longitude),
-                                    include_canadian_alerts=not include_us_alerts)
+                                    include_canadian_alerts=not include_us_alerts, unit_mode=unit_mode)
         stamp += " · " + note
     return image, stamp, field
