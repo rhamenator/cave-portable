@@ -1,0 +1,58 @@
+[
+  {
+    "id": "selma_al_2023", "state": "AL", "event": "Selma EF2 tornado",
+    "reference_utc": "2023-01-12T18:04Z", "reference_kind": "surveyed tornado onset",
+    "as_of_utc": "2023-01-12T17:00Z", "station": "MGM",
+    "radar_site": "BMX", "radar_as_of_utc": "2023-01-12T18:05Z",
+    "source": "https://www.weather.gov/bmx/event_01122023"
+  },
+  {
+    "id": "rolling_fork_ms_2023", "state": "MS", "event": "Rolling Fork–Silver City EF4 tornado",
+    "reference_utc": "2023-03-25T00:57Z", "reference_kind": "surveyed tornado onset",
+    "as_of_utc": "2023-03-24T23:00Z", "station": "GLH",
+    "radar_site": "DGX", "radar_as_of_utc": "2023-03-25T01:00Z",
+    "source": "https://mesonet.agron.iastate.edu/wx/afos/p.php?e=202306062206&pil=PNSJAN"
+  },
+  {
+    "id": "griffin_ga_2023", "state": "GA", "event": "Griffin-area EF3 tornado",
+    "reference_utc": "2023-01-12T21:10Z", "reference_kind": "surveyed tornado onset",
+    "as_of_utc": "2023-01-12T20:00Z", "station": "FFC",
+    "radar_site": "FFC", "radar_as_of_utc": "2023-01-12T21:12Z",
+    "source": "https://www.weather.gov/ffc/20230112_Tornado_Map"
+  },
+  {
+    "id": "mayfield_ky_2021", "state": "KY", "event": "Western Kentucky long-track EF4 tornado",
+    "reference_utc": "2021-12-11T02:49Z", "reference_kind": "surveyed tornado entry into Kentucky",
+    "as_of_utc": "2021-12-11T01:00Z", "station": "PAH",
+    "radar_site": "PAH", "radar_as_of_utc": "2021-12-11T02:50Z",
+    "source": "https://www.weather.gov/pah/December-10th-11th-2021-Tornado"
+  },
+  {
+    "id": "clarksville_tn_2023", "state": "TN", "event": "Clarksville EF3 tornado",
+    "reference_utc": "2023-12-09T19:41Z", "reference_kind": "surveyed tornado onset",
+    "as_of_utc": "2023-12-09T18:00Z", "station": "CKV",
+    "radar_site": "OHX", "radar_as_of_utc": "2023-12-09T19:45Z",
+    "source": "https://www.weather.gov/ohx/20231209"
+  },
+  {
+    "id": "glenallen_mo_2023", "state": "MO", "event": "Bollinger County EF2 tornado",
+    "reference_utc": "2023-04-05T08:30Z", "reference_kind": "surveyed tornado onset",
+    "as_of_utc": "2023-04-05T07:00Z", "station": "CGI",
+    "radar_site": "PAH", "radar_as_of_utc": "2023-04-05T08:35Z",
+    "source": "https://www.weather.gov/pah/april5Bollingertor"
+  },
+  {
+    "id": "little_rock_ar_2023", "state": "AR", "event": "Little Rock EF3 tornado",
+    "reference_utc": "2023-03-31T19:18Z", "reference_kind": "surveyed tornado onset",
+    "as_of_utc": "2023-03-31T18:00Z", "station": "LIT",
+    "radar_site": "LZK", "radar_as_of_utc": "2023-03-31T19:20Z",
+    "source": "https://www.weather.gov/lzk/svr0323ayr.htm"
+  },
+  {
+    "id": "valley_view_tx_2024", "state": "TX", "event": "Valley View area EF3 tornado",
+    "reference_utc": "2024-05-26T03:38Z", "reference_kind": "NWS confirmed-tornado update near Valley View, not onset",
+    "as_of_utc": "2024-05-26T02:00Z", "station": "DTO",
+    "radar_site": "FWS", "radar_as_of_utc": "2024-05-26T03:40Z",
+    "source": "https://mesonet.agron.iastate.edu/wx/afos/p.php?e=202405260338&pil=SVSFWD"
+  }
+]

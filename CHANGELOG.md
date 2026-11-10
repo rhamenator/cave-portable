@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 — 2026-11-10
+
+- Match decoded Level III reflectivity, velocity, CC, ZDR, and KDP to one radar-volume timeline; reject missing or stale matching fields instead of mixing product-specific frame indices.
+- Query local warning polygons at the saved US location rather than at the radar site. Show current SPC issue/valid times, NWS alert issue/expiry or check times, and a nearby airport observation on the decoded map. Mark current overlays when viewing an older scan.
+- Add NOAA observational replay research across eight documented Southern and Plains severe-weather cases, recording airport data gaps and decoded CC archive availability. This is research tooling, not an in-app historical warning replay or predictive score.
+- Measure current KGRR decode/render performance and review the refreshed private weather archives for product-catalog and station-quality ideas without copying private source or assets.
+
 ## 0.4.1 — 2026-11-09
 
 - Show a time-based altimeter trend from recent airport reports in the local briefing. Label it as an observation, not a storm forecast.

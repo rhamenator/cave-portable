@@ -284,7 +284,8 @@ class App:
         getattr(self, key + "_controls").pack(fill="x", pady=6)
         stamp = tk.StringVar(value="Source time pending. Images show source-provided valid times and legends when present.")
         setattr(self, key + "_stamp", stamp)
-        ttk.Label(frame, textvariable=stamp, foreground=MUTED).pack(anchor="w")
+        ttk.Label(frame, textvariable=stamp, foreground=MUTED,
+                  wraplength=900, justify="left").pack(anchor="w")
 
     def _satellite_controls(self):
         self.satellite_choice = tk.StringVar(value="GOES East")
@@ -445,7 +446,9 @@ class App:
                 elif choice in level3.PRODUCTS:
                     boundaries = self.radar_boundaries.get()
                     tilt = int(self.radar_tilt.get().split()[-1])
-                    self._submit("site-radar", lambda: level3.field_map(site, choice, sites, zoom, center, frame, boundaries, tilt),
+                    alert_point = self.guidance_point[1:3] if self.guidance_point[3] == "US" else None
+                    self._submit("site-radar", lambda: level3.field_map(site, choice, sites, zoom, center, frame, boundaries, tilt,
+                                                                        alert_point),
                                  lambda result: self._show_level3(site, choice, zoom, center, frame, boundaries, tilt, result))
                 else:
                     self.radar_field = None

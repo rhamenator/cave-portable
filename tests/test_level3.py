@@ -1,10 +1,10 @@
 import bz2
 import struct
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from cave_portable import level3, model, mrms
+from cave_portable import level3, model, mrms, overlays, radar
 from cave_portable.data import DataError
 
 
@@ -70,6 +70,11 @@ class Level3Tests(unittest.TestCase):
         with self.assertRaises(DataError):
             level3.decode(sample[:150], "GRR", "N0C")
 
+    def test_wmo_office_can_differ_from_radar_site(self):
+        sample = synthetic_cc().replace(b"KGRR", b"KJAN").replace(b"N0CGRR", b"N0CDGX")
+        field = level3.decode(sample, "DGX", "N0C")
+        self.assertEqual(field.site, "DGX")
+
     @patch.object(level3, "_day_keys")
     def test_recent_keys_exclude_future_and_stale_scans(self, listing):
         listing.return_value = ["GRR_N0C_2026_11_10_00_01_00",
@@ -78,6 +83,33 @@ class Level3Tests(unittest.TestCase):
         now = datetime(2026, 11, 10, 0, 10, tzinfo=timezone.utc)
         self.assertEqual(level3.recent_keys("GRR", "N0C", now),
                          ["GRR_N0C_2026_11_10_00_05_00", "GRR_N0C_2026_11_10_00_01_00"])
+
+    @patch.object(level3, "_fetch")
+    @patch.object(level3, "recent_keys")
+    def test_volume_match_rejects_unrelated_product_frame(self, listing, fetch):
+        scan = datetime(2026, 11, 10, 0, 1, tzinfo=timezone.utc)
+        listing.return_value = ["GRR_N0C_2026_11_10_00_06_00",
+                                "GRR_N0C_2026_11_10_00_01_00"]
+        fetch.return_value = synthetic_cc()
+        field = level3.fetch_field_near("GRR", "N0C", scan, scan + timedelta(minutes=8))
+        self.assertEqual(field.time, scan)
+        self.assertIn("00_01_00", fetch.call_args.args[0])
+        with self.assertRaises(DataError):
+            level3.fetch_field_near("GRR", "N0C", scan - timedelta(minutes=4),
+                                    scan + timedelta(minutes=8))
+
+    @patch.object(overlays, "draw")
+    @patch.object(level3, "render")
+    @patch.object(level3, "fetch_field")
+    def test_saved_point_drives_warning_query_even_when_radar_is_elsewhere(self, fetch, render, draw):
+        from PIL import Image
+        field = level3.decode(synthetic_digital("N0B", 153, -32), "GRR", "N0B")
+        fetch.return_value = field
+        render.return_value = Image.new("RGB", (200, 100))
+        draw.side_effect = lambda image, *args, **kwargs: (image, "alerts checked")
+        level3.field_map("GRR · Grand Rapids", "Digital reflectivity", radar.SITES,
+                         alert_point=(42.7761, -84.5997))
+        self.assertEqual(draw.call_args.args[2], (42.7761, -84.5997))
 
     @patch.object(model, "_fetch")
     def test_gfs_catalog_has_explicit_run_paths(self, fetch):

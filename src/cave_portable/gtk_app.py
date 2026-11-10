@@ -108,7 +108,7 @@ class App:
         self.tabs = Gtk.Notebook()
         outer.pack_start(self.tabs, True, True, 0)
         self.observations_ui()
-        self.image_ui("radar", "Radar", "NOAA/NWS national radar and current single-site products")
+        self.image_ui("radar", "Radar", "Decoded NOAA Level III radar at the selected site · optional national composite")
         self.image_ui("satellite", "Satellite", "NOAA/NESDIS GOES GeoColor")
         self.image_ui("severe", "Severe outlook & CAPE", "SPC categorical outlooks and Southern Plains MLCAPE")
         self.image_ui("model", "Forecast ingredients", "Selected GFS run and field · NSF Unidata THREDDS / USGS map")
@@ -288,6 +288,8 @@ class App:
             controls.pack_start(self.hrrr_hour, False, False, 0)
             self.add_zoom_controls(controls)
         stamp = label("Source time pending. Images show source-provided valid times and legends when present.")
+        stamp.set_line_wrap(True)
+        stamp.set_max_width_chars(120)
         page.pack_start(stamp, False, False, 0)
         self.image_stamps[key] = stamp
 
@@ -371,7 +373,9 @@ class App:
                     self.submit("site-radar", lambda: mrms.swath_map(site, sites, zoom, center),
                                 lambda result: self.show_product("radar", token, result, ""))
                 elif product in level3.PRODUCTS:
-                    self.submit("site-radar", lambda: level3.field_map(site, product, sites, zoom, center, frame, boundaries, tilt),
+                    alert_point = self.guidance_point[1:3] if self.guidance_point[3] == "US" else None
+                    self.submit("site-radar", lambda: level3.field_map(site, product, sites, zoom, center, frame, boundaries, tilt,
+                                                                       alert_point),
                                 lambda result: self.show_level3(token, result))
                 else:
                     self.radar_field = None
