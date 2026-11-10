@@ -9,7 +9,7 @@ import sys
 import tkinter as tk
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from importlib.resources import files
 from tkinter import messagebox, ttk
 
@@ -20,6 +20,7 @@ from . import data
 from . import model
 from . import hrrr
 from . import radar
+from . import spc
 from . import preferences
 from . import location
 
@@ -47,6 +48,12 @@ class App:
         self.image_urls: dict[str, str] = {}
         self.radar_sites = dict(radar.SITES)
         self.radar_zoom = 1
+        self.radar_center: tuple[float, float] | None = None
+        self.radar_zoom_text = tk.StringVar(value="1×")
+        self.guidance_point = ("KLAN", 42.7761, -84.5997, "US")
+        self.guidance_last_fetch: dict[str, datetime] = {}
+        self.guidance_text = tk.StringVar(value="Loading local SPC outlook for KLAN…")
+        self.forecast_text = tk.StringVar(value="Loading local NWS forecast…")
         self.resize_job: str | None = None
         self.fallback_chrome = False
         self.drag_origin: tuple[int, int, int, int] | None = None
@@ -136,6 +143,10 @@ class App:
         self.root.after(60_000, self._periodic)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.bind("<Configure>", self._schedule_image_resize)
+        for key in ("<plus>", "<equal>", "<KP_Add>"):
+            self.root.bind(key, lambda event: self._radar_key(event, 1))
+        for key in ("<minus>", "<KP_Subtract>"):
+            self.root.bind(key, lambda event: self._radar_key(event, -1))
         self.root.after(80, self._present_window)
 
     def _present_window(self):
@@ -190,6 +201,7 @@ class App:
         entry.pack(side="left", padx=6)
         entry.bind("<Return>", lambda _e: self.load_station())
         ttk.Button(bar, text="Load station", command=self.load_station).pack(side="left")
+        ttk.Button(bar, text="View nearest radar", command=self._open_selected_radar).pack(side="left", padx=4)
         ttk.Label(bar, text="US state alerts:").pack(side="left", padx=(22, 4))
         self.state = tk.StringVar(value="MI")
         ttk.Entry(bar, textvariable=self.state, width=5).pack(side="left")
@@ -215,6 +227,7 @@ class App:
         scrollbar.pack(side="right", fill="y")
         self.table.configure(yscrollcommand=scrollbar.set)
         self.table.bind("<<TreeviewSelect>>", self._select_station)
+        self.table.bind("<Double-1>", lambda _event: self._open_selected_radar())
         self.details = tk.Text(self.observations_tab, height=3, wrap="word", bg="#172632", fg=FG, insertbackground=FG, relief="flat", padx=10, pady=8)
         self.details.pack(fill="x", pady=(8, 0))
         self.details.insert("1.0", "Select an observation or load a station. METAR and TAF from NOAA Aviation Weather Center. Alerts from NWS.")
@@ -223,6 +236,12 @@ class App:
 
     def _image_ui(self, frame, key: str, caption: str):
         ttk.Label(frame, text=caption, foreground=MUTED).pack(anchor="w", pady=(0, 6))
+        if key in ("severe", "hrrr"):
+            ttk.Label(frame, textvariable=self.guidance_text, foreground=FG,
+                      wraplength=900, justify="left").pack(anchor="w", pady=(0, 5))
+        if key == "hrrr":
+            ttk.Label(frame, textvariable=self.forecast_text, foreground=MUTED,
+                      wraplength=900, justify="left").pack(anchor="w", pady=(0, 5))
         label = ttk.Label(frame, text="Open this tab to load imagery", anchor="center")
         label.pack(fill="both", expand=True)
         setattr(self, key + "_image", label)
@@ -251,6 +270,7 @@ class App:
         picker.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
         self.model_valid = tk.StringVar(value="Choose a forecast time; the GFS best time series may combine runs.")
         ttk.Label(self.model_controls, textvariable=self.model_valid, foreground=MUTED).pack(side="left", padx=12)
+        self._add_zoom_controls(self.model_controls)
 
     def _hrrr_controls(self):
         ttk.Label(self.hrrr_controls, text="Hours after latest HRRR run:").pack(side="left", padx=6)
@@ -260,19 +280,28 @@ class App:
         picker.pack(side="left", padx=6)
         picker.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
 
+        self._add_zoom_controls(self.hrrr_controls)
+
+    def _add_zoom_controls(self, controls):
+        ttk.Button(controls, text="−", width=3, command=lambda: self._step_radar_zoom(-1)).pack(side="left", padx=2)
+        ttk.Label(controls, textvariable=self.radar_zoom_text).pack(side="left")
+        ttk.Button(controls, text="+", width=3, command=lambda: self._step_radar_zoom(1)).pack(side="left", padx=2)
+
     def _radar_controls(self):
-        self.radar_product = tk.StringVar(value="National reflectivity")
+        self.radar_product = tk.StringVar(value="Site reflectivity")
         product = ttk.Combobox(self.radar_controls, textvariable=self.radar_product, values=("National reflectivity", *radar.PRODUCTS), state="readonly", width=24)
         product.pack(side="left", padx=6)
         product.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
-        self.radar_site = tk.StringVar(value="DTX · Detroit")
+        self.radar_site = tk.StringVar(value="GRR · Grand Rapids")
         site = ttk.Combobox(self.radar_controls, textvariable=self.radar_site, values=tuple(self.radar_sites), state="readonly", width=25)
         self.radar_site_picker = site
         site.pack(side="left", padx=6)
-        site.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
-        for factor in (1, 2, 4):
-            ttk.Button(self.radar_controls, text=f"{factor}×", width=3,
-                       command=lambda factor=factor: self._set_radar_zoom(factor)).pack(side="left", padx=2)
+        site.bind("<<ComboboxSelected>>", lambda _e: self._radar_site_changed())
+        ttk.Button(self.radar_controls, text="−", width=3,
+                   command=lambda: self._step_radar_zoom(-1)).pack(side="left", padx=2)
+        ttk.Label(self.radar_controls, textvariable=self.radar_zoom_text).pack(side="left")
+        ttk.Button(self.radar_controls, text="+", width=3,
+                   command=lambda: self._step_radar_zoom(1)).pack(side="left", padx=2)
         self.radar_valid = tk.StringVar(value="National composite · NOAA/NWS")
         ttk.Label(self.radar_controls, textvariable=self.radar_valid, foreground=MUTED).pack(side="left", padx=8)
 
@@ -310,6 +339,10 @@ class App:
                         self._set_details("NWS alerts unavailable. Check weather.gov directly.")
                 elif key == "point-alerts":
                     self.point_status.set("Local warning feed unavailable; check your official weather service")
+                elif key == "spc-guidance":
+                    self.guidance_text.set(f"Local SPC outlook unavailable: {exc}. Check the official SPC outlook.")
+                elif key == "point-forecast":
+                    self.forecast_text.set(f"Local NWS forecast unavailable: {exc}")
                 elif key in ("location", "local-weather"):
                     self.point_status.set(f"Local weather unavailable: {exc}")
                     if key == "local-weather":
@@ -319,7 +352,8 @@ class App:
     def refresh(self):
         tab = self.tabs.index(self.tabs.select())
         if tab == 0:
-            self._submit("observations", data.metars, self._show_observations)
+            stations = tuple(dict.fromkeys((self._station_for_settings(), *data.STATIONS)))
+            self._submit("observations", lambda: data.metars(stations), self._show_observations)
         elif tab == 1:
             choice, site = self.radar_product.get(), self.radar_site.get()
             if choice == "National reflectivity":
@@ -327,23 +361,108 @@ class App:
                 self._load_image("radar", data.RADAR_URL)
             else:
                 sites, zoom = self.radar_sites, self.radar_zoom
-                self._submit("site-radar", lambda: radar.site_map(site, choice, sites=sites, zoom=zoom),
-                             lambda result: self._show_site_radar(site, choice, zoom, result))
+                center = self.radar_center
+                self._submit("site-radar", lambda: radar.site_map(site, choice, sites=sites, zoom=zoom, center=center),
+                             lambda result: self._show_site_radar(site, choice, zoom, center, result))
         elif tab == 2:
             self._load_image("satellite", data.SATELLITE[self.satellite_choice.get()])
         elif tab == 3:
             choice = self.severe_choice.get()
             self._load_image("severe", data.MLCAPE_URL if choice == "Southern Plains MLCAPE" else data.OUTLOOK[choice])
+            self._refresh_guidance()
         elif tab == 4:
             hours = int(self.model_hour.get())
-            self._submit("model", lambda: model.cape_map(hours), lambda result: self._show_model(hours, result))
+            place, lat, lon, _country = self.guidance_point
+            zoom = self.radar_zoom
+            token = f"GFS:{hours}:{lat:.4f}:{lon:.4f}:{zoom}"
+            self.model_request_token = token
+            self._submit("model", lambda: model.cape_map(hours, model.regional_bbox(lat, lon, zoom)),
+                         lambda result: self._show_model(hours, token, place, result))
 
         elif tab == 5:
             hours = int(self.hrrr_hour.get())
-            self._submit("hrrr", lambda: hrrr.reflectivity(hours), lambda result: self._show_hrrr(hours, result))
+            place, lat, lon, _country = self.guidance_point
+            zoom = self.radar_zoom
+            token = f"HRRR:{hours}:{lat:.4f}:{lon:.4f}:{zoom}"
+            self.hrrr_request_token = token
+            self._submit("hrrr", lambda: hrrr.reflectivity(hours, center=(lat, lon), zoom=zoom),
+                         lambda result: self._show_hrrr(hours, token, place, result))
+            self._refresh_guidance()
+
+    def _set_guidance_point(self, place, lat, lon, country="US"):
+        target = (place, lat, lon, country)
+        if target != self.guidance_point:
+            self.guidance_point = target
+            self.guidance_last_fetch.clear()
+            self.guidance_text.set(f"Loading local SPC outlook for {place}…" if country == "US"
+                                   else "SPC severe outlooks cover the contiguous US")
+            self.forecast_text.set("Loading local NWS forecast…" if country == "US"
+                                   else "NWS point forecasts cover the contiguous US")
+            if self.tabs.index(self.tabs.select()) in (3, 5):
+                self._refresh_guidance()
+            if self.tabs.index(self.tabs.select()) in (4, 5):
+                self.refresh()
+
+    def _refresh_guidance(self):
+        place, lat, lon, country = self.guidance_point
+        if country != "US":
+            return
+        target = self.guidance_point
+        now = datetime.now(timezone.utc)
+        if "spc" not in self.guidance_last_fetch or now - self.guidance_last_fetch["spc"] >= timedelta(minutes=10):
+            self._submit("spc-guidance", lambda: (target, spc.point_guidance(lat, lon).summary(place)), self._show_spc_guidance)
+        if "nws" not in self.guidance_last_fetch or now - self.guidance_last_fetch["nws"] >= timedelta(minutes=10):
+            self._submit("point-forecast", lambda: (target, data.point_forecast(lat, lon)), self._show_nws_forecast)
+
+    def _show_spc_guidance(self, result):
+        target, outlook = result
+        if target != self.guidance_point:
+            self._refresh_guidance()
+            return
+        self.guidance_last_fetch["spc"] = datetime.now(timezone.utc)
+        self.guidance_text.set(outlook)
+
+    def _show_nws_forecast(self, result):
+        target, forecast = result
+        if target != self.guidance_point:
+            self._refresh_guidance()
+            return
+        self.guidance_last_fetch["nws"] = datetime.now(timezone.utc)
+        self.forecast_text.set(forecast)
 
     def _set_radar_zoom(self, factor):
+        if factor not in radar.ZOOMS:
+            return
+        if self.tabs.index(self.tabs.select()) == 1 and self.radar_product.get() == "National reflectivity":
+            self.radar_product.set("Site reflectivity")
         self.radar_zoom = factor
+        self.radar_zoom_text.set(f"{factor}×")
+        if self.tabs.index(self.tabs.select()) in (1, 4, 5):
+            self.refresh()
+
+    def _step_radar_zoom(self, direction):
+        index = radar.ZOOMS.index(self.radar_zoom)
+        self._set_radar_zoom(radar.ZOOMS[max(0, min(len(radar.ZOOMS) - 1, index + direction))])
+
+    def _radar_key(self, event, direction):
+        if self.tabs.index(self.tabs.select()) not in (1, 4, 5) or isinstance(event.widget, (ttk.Entry, ttk.Combobox, tk.Entry)):
+            return None
+        self._step_radar_zoom(direction)
+        return "break"
+
+    def _radar_site_changed(self):
+        self.radar_center = None
+        if self.radar_product.get() == "National reflectivity":
+            self.radar_product.set("Site reflectivity")
+        if self.tabs.index(self.tabs.select()) == 1:
+            self.refresh()
+
+    def _set_nearest_radar(self, lat, lon):
+        site = radar.nearest_site(lat, lon, self.radar_sites)
+        self.radar_site.set(site)
+        self.radar_center = (lat, lon)
+        if self.radar_product.get() == "National reflectivity":
+            self.radar_product.set("Site reflectivity")
         if self.tabs.index(self.tabs.select()) == 1:
             self.refresh()
 
@@ -355,18 +474,20 @@ class App:
         self.radar_sites = sites
         self.radar_site_picker.configure(values=tuple(sites))
         self.radar_site.set(next((name for name in sites if name.startswith(selected + " · ")), next(iter(sites))))
+        if self.tabs.index(self.tabs.select()) == 1:
+            self.refresh()
 
-    def _show_hrrr(self, hours, result):
-        if hours != int(self.hrrr_hour.get()):
+    def _show_hrrr(self, hours, token, place, result):
+        if hours != int(self.hrrr_hour.get()) or token != self.hrrr_request_token:
             self.refresh()
             return
         picture, timing = result
-        self.hrrr_stamp.set(f"NCEP HRRR simulated reflectivity · {timing} · forecast")
-        self.image_urls["hrrr"] = "hrrr"
-        self._show_image("hrrr", "hrrr", picture)
+        self.hrrr_stamp.set(f"NCEP HRRR simulated reflectivity around {place} · {timing} · forecast")
+        self.image_urls["hrrr"] = token
+        self._show_image("hrrr", token, picture)
 
-    def _show_site_radar(self, site, choice, zoom, result):
-        if site != self.radar_site.get() or choice != self.radar_product.get() or zoom != self.radar_zoom:
+    def _show_site_radar(self, site, choice, zoom, center, result):
+        if site != self.radar_site.get() or choice != self.radar_product.get() or zoom != self.radar_zoom or center != self.radar_center:
             self.root.after(0, self.refresh)
             return
         picture, valid = result
@@ -376,15 +497,15 @@ class App:
         self.image_urls["radar"] = "site-radar"
         self._show_image("radar", "site-radar", picture)
 
-    def _show_model(self, hours, result):
-        if hours != int(self.model_hour.get()):
+    def _show_model(self, hours, token, place, result):
+        if hours != int(self.model_hour.get()) or token != self.model_request_token:
             self.root.after(0, self.refresh)
             return
         picture, valid = result
-        self.model_valid.set("Valid " + valid + " · GFS best time series")
+        self.model_valid.set("Around " + place + " · Valid " + valid + " · GFS best time series")
         self.model_stamp.set("Forecast valid " + valid + " · not an observation or warning")
-        self.image_urls["model"] = "gfs"
-        self._show_image("model", "gfs", picture)
+        self.image_urls["model"] = token
+        self._show_image("model", token, picture)
 
     def _periodic(self):
         if not self.closed:
@@ -419,7 +540,7 @@ class App:
     def _show_observations(self, rows):
         self.table.delete(*self.table.get_children())
         self.rows = {row.station: row for row in rows}
-        for row in rows:
+        for row in sorted(rows, key=lambda row: (row.station != self._station_for_settings(), row.station)):
             self.table.insert("", "end", iid=row.station, values=(row.station, row.name, row.observed, f"{row.temp_c:.1f}" if row.temp_c is not None else "—", row.wind, row.visibility, row.flight_category))
         if not rows:
             self._set_details("No observations returned. Try loading a station directly.")
@@ -436,6 +557,20 @@ class App:
             row = self.rows[selected[0]]
             self.station.set(row.station)
             self._set_details(f"{row.name} · {row.observed}\n\n{row.raw}")
+            if row.lat is not None and row.lon is not None:
+                self._set_guidance_point(row.station, row.lat, row.lon)
+                self._set_nearest_radar(row.lat, row.lon)
+
+    def _open_selected_radar(self):
+        row = self.rows.get(self.station.get().strip().upper())
+        if row and row.lat is not None and row.lon is not None:
+            self._set_nearest_radar(row.lat, row.lon)
+            self.tabs.select(self.radar_tab)
+        elif self.postal_location:
+            self._set_nearest_radar(self.postal_location.lat, self.postal_location.lon)
+            self.tabs.select(self.radar_tab)
+        else:
+            self.status.set("Load or select a station with coordinates to view nearby radar")
 
     def load_station(self):
         try:
@@ -450,6 +585,19 @@ class App:
         if not rows:
             self._set_details("No observation for that station.\n\n" + forecast)
         else:
+            row = rows[0]
+            if row.station not in self.rows:
+                self.table.insert("", 0, iid=row.station,
+                                  values=(row.station, row.name, row.observed,
+                                          f"{row.temp_c:.1f}" if row.temp_c is not None else "—",
+                                          row.wind, row.visibility, row.flight_category))
+            self.rows[row.station] = row
+            saved = preferences.load()
+            saved["station"] = row.station
+            preferences.save(saved)
+            if row.lat is not None and row.lon is not None:
+                self._set_guidance_point(row.station, row.lat, row.lon)
+                self._set_nearest_radar(row.lat, row.lon)
             self._set_details(f"{rows[0].name} · {rows[0].observed}\n\n{rows[0].raw}\n\nFORECAST\n{forecast}")
 
     def set_location(self):
@@ -495,6 +643,8 @@ class App:
         if prior != resolved:
             self.monitor_seen.clear()
         self.postal_location = resolved
+        self._set_guidance_point(resolved.locality or resolved.code, resolved.lat, resolved.lon, resolved.country)
+        self._set_nearest_radar(resolved.lat, resolved.lon)
         self.postal_code.set(resolved.code)
         self.monitor_point = (resolved.lat, resolved.lon) if self.monitor_enabled.get() else None
         self.point_status.set(resolved.label)

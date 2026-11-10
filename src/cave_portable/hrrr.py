@@ -24,7 +24,8 @@ def _utc(value) -> datetime:
         raise data.DataError("HRRR metadata time was invalid") from exc
 
 
-def reflectivity(hours: int, now: datetime | None = None) -> tuple[Image.Image, str]:
+def reflectivity(hours: int, now: datetime | None = None,
+                 center: tuple[float, float] | None = None, zoom: int = 1) -> tuple[Image.Image, str]:
     """Latest run's future simulated reflectivity; stale/past guidance is withheld."""
     if hours not in HOURS:
         raise data.DataError("Unsupported HRRR forecast lead")
@@ -40,16 +41,17 @@ def reflectivity(hours: int, now: datetime | None = None) -> tuple[Image.Image, 
         raise data.DataError("Latest HRRR run is too old for near-term guidance")
     if valid < current:
         raise data.DataError("Selected HRRR lead is already past; choose a longer lead")
+    bbox = model.regional_bbox(*center, zoom) if center else model.NATIONAL_BBOX
     params = {
         "service": "WMS", "request": "GetMap", "version": "1.1.1",
         "layers": f"refd_{hours * 60:04d}", "styles": "", "format": "image/png",
-        "transparent": "true", "srs": "EPSG:4326", "bbox": "-130,20,-60,55",
+        "transparent": "true", "srs": "EPSG:4326", "bbox": bbox,
         "width": str(model.WIDTH), "height": str(model.HEIGHT),
     }
     overlay = model._png(WMS + "?" + urlencode(params))
     if overlay.size != (model.WIDTH, model.HEIGHT):
         raise data.DataError("HRRR service returned an unexpected map size")
-    result = model._basemap().copy()
+    result = model._basemap(bbox).copy()
     result.alpha_composite(overlay)
     timing = f"Run {initialized:%d %b %H:%M UTC} · valid {valid:%d %b %H:%M UTC}"
     # Render a new, source-attributed forecast image from the WMS field and map.

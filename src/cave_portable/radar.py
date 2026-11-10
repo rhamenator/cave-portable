@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+import math
 from urllib.parse import urlencode
 from xml.etree import ElementTree
 
@@ -14,6 +15,7 @@ from .model import BASEMAP, HEIGHT, WIDTH, _png
 
 # Curated site centers keep both the map view and network target bounded.
 SITES = {
+    "GRR · Grand Rapids": ("GRR", -85.54, 42.89, "KGRR"),
     "DTX · Detroit": ("DTX", -83.47, 42.70),
     "TLX · Oklahoma City": ("TLX", -97.28, 35.33),
     "FWS · Dallas/Fort Worth": ("FWS", -97.30, 32.57),
@@ -29,6 +31,15 @@ WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/ridge.cgi"
 METADATA = "https://mesonet.agron.iastate.edu/data/gis/images/4326/ridge"
 NWS_STATIONS = "https://api.weather.gov/radar/stations"
 NWS_WMS = "https://opengeo.ncep.noaa.gov/geoserver"
+ZOOMS = (1, 2, 4, 8, 16)
+
+
+def nearest_site(lat: float, lon: float, sites: dict) -> str:
+    """Pick the closest catalog radar to an explicit airport or postal coordinate."""
+    if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180) or not sites:
+        raise DataError("No valid location or radar catalog")
+    return min(sites, key=lambda name: (sites[name][2] - lat) ** 2
+               + ((sites[name][1] - lon) * math.cos(math.radians(lat))) ** 2)
 
 
 def available_sites() -> dict[str, tuple[str, float, float, str]]:
@@ -61,14 +72,19 @@ def available_sites() -> dict[str, tuple[str, float, float, str]]:
     return dict(sorted(sites.items()))
 
 
-def _bbox(site: str, sites: dict | None = None, zoom: int = 1) -> str:
-    if zoom not in (1, 2, 4):
+def _bbox(site: str, sites: dict | None = None, zoom: int = 1,
+          center: tuple[float, float] | None = None) -> str:
+    if zoom not in ZOOMS:
         raise DataError("Unsupported radar zoom")
     try:
         record = (sites or SITES)[site]
         lon, lat = record[1], record[2]
     except KeyError as exc:
         raise DataError("Unknown radar site") from exc
+    if center is not None:
+        lat, lon = center
+        if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180):
+            raise DataError("Invalid radar map center")
     return f"{lon-3.5/zoom:.3f},{lat-2.5/zoom:.3f},{lon+3.5/zoom:.3f},{lat+2.5/zoom:.3f}"
 
 
@@ -82,14 +98,15 @@ def _site_base(bbox: str) -> Image.Image:
 
 
 def site_map(site: str, product_name: str, now: datetime | None = None,
-             sites: dict | None = None, zoom: int = 1) -> tuple[Image.Image, str]:
+             sites: dict | None = None, zoom: int = 1,
+             center: tuple[float, float] | None = None) -> tuple[Image.Image, str]:
     sites = sites or SITES
-    if site not in sites or product_name not in PRODUCTS or zoom not in (1, 2, 4):
+    if site not in sites or product_name not in PRODUCTS or zoom not in ZOOMS:
         raise DataError("Unknown radar site or product")
     record = sites[site]
     site_id = record[0]
     product = PRODUCTS[product_name]
-    bbox = _bbox(site, sites, zoom)
+    bbox = _bbox(site, sites, zoom, center)
     if product == "BDHC":
         return _nws_hydrometeor(record[3] if len(record) > 3 else "K" + site_id, bbox, now)
     metadata = _json(f"{METADATA}/{site_id}/{product}_0.json")

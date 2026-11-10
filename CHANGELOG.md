@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-11-09
+
+- Add KLAN to the observation list and use the nearest radar site when a station is selected. Selecting KLAN opens a Lansing-centered KGRR site image.
+- Add +/− buttons and keys for radar, regional GFS CAPE, and HRRR maps, with 1× through 16× geographic extents.
+- Query official SPC Day 1 vector outlooks for the selected US point and show categorical and tornado/hail/wind values with issue and valid times. Add a readable NWS point forecast. These are source values, not a new severe-weather prediction.
+- Inspect the installed CAVE radar plug-in and public weather repositories; document a decoded Level II/III radar and numerical-model roadmap. No AWIPS or private code is included.
+
 ## 0.2.0 — 2026-11-09
 
 - Load the live NWS WSR-88D station catalog (159 sites in the verified response), with a small offline fallback, and add 1×/2×/4× radar site zoom.

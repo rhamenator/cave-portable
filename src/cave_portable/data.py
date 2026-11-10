@@ -6,16 +6,16 @@ import json
 import math
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-USER_AGENT = "CAVE-Portable/0.1 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.2.1 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
-    "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KATL", "KMIA", "KBOS",
+    "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
     "KJFK", "KDCA", "KCLT", "KMCI", "KSTL", "KBNA", "KMSY", "KABQ",
 )
 RADAR_URL = "https://radar.weather.gov/ridge/standard/CONUS_0.gif"
@@ -179,6 +179,39 @@ def taf(station: str) -> str:
     if not isinstance(payload, list):
         raise DataError("Unexpected TAF response")
     return str(payload[0].get("rawTAF") or "No forecast available")[:5000] if payload else "No forecast available"
+
+
+def point_forecast(lat: float, lon: float) -> str:
+    """Readable NWS point forecast from its current WFO grid mapping."""
+    if not (math.isfinite(lat) and math.isfinite(lon) and 24 <= lat <= 50 and -126 <= lon <= -66):
+        raise DataError("NWS point forecast covers the contiguous US")
+    point = _json(f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}")
+    props = point.get("properties") if isinstance(point, dict) else None
+    url = props.get("forecast") if isinstance(props, dict) else None
+    if not isinstance(url, str) or not re.fullmatch(
+        r"https://api\.weather\.gov/gridpoints/[A-Z]{3}/\d+,\d+/forecast", url):
+        raise DataError("NWS forecast grid URL was invalid")
+    forecast = _json(url)
+    props = forecast.get("properties") if isinstance(forecast, dict) else None
+    periods = props.get("periods") if isinstance(props, dict) else None
+    if not isinstance(periods, list) or not periods:
+        raise DataError("NWS point forecast was unavailable")
+    try:
+        updated = datetime.fromisoformat(str(props["updateTime"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DataError("NWS point forecast time was invalid") from exc
+    if datetime.now(timezone.utc) - updated > timedelta(hours=18):
+        raise DataError("NWS point forecast is stale")
+    lines = []
+    for period in periods[:2]:
+        if not isinstance(period, dict):
+            continue
+        name, detail = str(period.get("name") or "").strip(), str(period.get("detailedForecast") or "").strip()
+        if name and detail:
+            lines.append(f"{name}: {detail[:160]}")
+    if not lines:
+        raise DataError("NWS point forecast had no readable periods")
+    return f"NWS point forecast · updated {updated:%d %b %H:%M UTC}\n" + "\n".join(lines)
 
 
 def alerts(state: str) -> list[tuple[str, str, str]]:

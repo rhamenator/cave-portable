@@ -72,6 +72,19 @@ class DataTests(unittest.TestCase):
         with self.assertRaisesRegex(data.DataError, "stale"):
             data.image_record(data.RADAR_URL)
 
+    @patch.object(data, "_json")
+    def test_point_forecast_reads_current_nws_grid_and_rejects_foreign_url(self, fetch):
+        fetch.side_effect = [
+            {"properties": {"forecast": "https://api.weather.gov/gridpoints/GRR/78,41/forecast"}},
+            {"properties": {"updateTime": datetime.now(timezone.utc).isoformat(),
+                            "periods": [{"name": "Tonight", "detailedForecast": "Partly cloudy."}]}}
+        ]
+        self.assertIn("Tonight: Partly cloudy.", data.point_forecast(42.7761, -84.5997))
+        fetch.reset_mock(side_effect=True)
+        fetch.return_value = {"properties": {"forecast": "https://example.com/unsafe"}}
+        with self.assertRaisesRegex(data.DataError, "URL was invalid"):
+            data.point_forecast(42.7761, -84.5997)
+
 
 if __name__ == "__main__":
     unittest.main()
