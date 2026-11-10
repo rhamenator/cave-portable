@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 from . import units
 
-USER_AGENT = "CAVE-Portable/0.4.6 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.4.7 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
@@ -266,10 +266,12 @@ def point_forecast(lat: float, lon: float, mode: str = "US") -> str:
             continue
         name, detail = str(period.get("name") or "").strip(), str(period.get("detailedForecast") or "").strip()
         if name and detail:
-            lines.append(f"{name}: {detail[:160]}")
+            lines.append(f"{name}: {units.nws_wind_text(detail, mode)[:160]}")
     if not lines:
         raise DataError("NWS point forecast had no readable periods")
-    return f"NWS point forecast · updated {updated:%d %b %H:%M UTC}\n" + "\n".join(lines)
+    display_units = {"US": "°F, mph", "Metric": "°C, km/h",
+                     "Hybrid": "°C, km/h", "UK Hybrid": "°C, mph"}.get(mode, "source units")
+    return f"NWS point forecast ({display_units}) · updated {updated:%d %b %H:%M UTC}\n" + "\n".join(lines)
 
 
 def hourly_forecast(lat: float, lon: float, mode: str = "US") -> str:

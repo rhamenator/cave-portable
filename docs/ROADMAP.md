@@ -4,7 +4,7 @@ See the [native-code assessment](PORTING_ASSESSMENT.md) for measured performance
 
 ## Current release
 
-0.4.6 adds saved US, Metric, and Hybrid display units to both desktop interfaces. It includes the 0.4.5 NOAA/ECCC winter alert boundaries and forecast briefing. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
+0.4.7 adds a UK Hybrid display profile alongside the saved US, Metric, and existing Hybrid choices in both desktop interfaces. It includes the 0.4.5 NOAA/ECCC winter alert boundaries and forecast briefing. The app still lacks decoded Level II data, EDEX integration, and soundings. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 The source branch also contains [NOAA observational replay](NOAA_REPLAY.md) tools for historical case studies. Locally generated severe-weather prediction remains a later research question.
 

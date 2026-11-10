@@ -143,7 +143,7 @@ def swath_map(site_name: str, sites: dict, zoom: int = 1,
         draw.rectangle((8, 73, 325, 97), fill=(15, 27, 41, 225))
         draw.text((15, 78), "No positive hail estimate in this view", fill="white")
     draw.rectangle((8, HEIGHT - 33, 401, HEIGHT - 6), fill=(15, 27, 41, 225))
-    labels = ("<2.5 cm", "2.5–5 cm", "5–7.5 cm", "≥7.5 cm") if unit_mode == "Metric" else ("<1 in", "1–2 in", "2–3 in", "≥3 in")
+    labels = ("<2.5 cm", "2.5–5 cm", "5–7.5 cm", "≥7.5 cm") if unit_mode in ("Metric", "UK Hybrid") else ("<1 in", "1–2 in", "2–3 in", "≥3 in")
     for i, (color, label) in enumerate(zip(("#ffdd35", "#f47830", "#d23150", "#9339b1"), labels)):
         x = 15 + i * 95
         draw.rectangle((x, HEIGHT - 26, x + 15, HEIGHT - 12), fill=color)

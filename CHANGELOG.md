@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.7 — 2026-11-10
+
+- Add a separate UK Hybrid preference: °C for temperature, mph for wind, miles for visibility, cm for snow, and mm for ice and hail. Preserve the previous Hybrid profile.
+- Convert explicit km/h wind speeds in NWS SI forecast prose to mph for UK Hybrid, including ranges. Raw official alert and ECCC wording retain their source units.
+
 ## 0.4.6 — 2026-11-10
 
 - Add a saved US, Metric, or Hybrid unit selector to both desktop interfaces. Convert app-generated temperature, wind, visibility, pressure-trend, winter, and hail values; request NWS forecast text in US or SI units.

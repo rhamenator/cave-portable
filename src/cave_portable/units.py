@@ -5,13 +5,13 @@ from __future__ import annotations
 import math
 import re
 
-MODES = ("US", "Metric", "Hybrid")
+MODES = ("US", "Metric", "Hybrid", "UK Hybrid")
 DEFAULT = "Hybrid"
 
 
 def validate(mode: str) -> str:
     if mode not in MODES:
-        raise ValueError("Choose US, Metric, or Hybrid units")
+        raise ValueError("Choose US, Metric, Hybrid, or UK Hybrid units")
     return mode
 
 
@@ -28,7 +28,7 @@ def wind(knots_text: str, mode: str) -> str:
     if not match:
         return knots_text
     speed = float(match[2])
-    if mode == "US":
+    if mode in ("US", "UK Hybrid"):
         return f"{match[1]} {speed * 1.150779:.0f} mph"
     return f"{match[1]} {speed * 1.852:.0f} km/h"
 
@@ -38,18 +38,18 @@ def visibility(miles_text: str, mode: str) -> str:
         miles = float(miles_text)
     except (TypeError, ValueError):
         return miles_text
-    return f"{miles * 1.609344:.1f}" if mode != "US" else f"{miles:g}"
+    return f"{miles * 1.609344:.1f}" if mode in ("Metric", "Hybrid") else f"{miles:g}"
 
 
 def visibility_unit(mode: str) -> str:
-    return "km" if mode != "US" else "mi"
+    return "km" if mode in ("Metric", "Hybrid") else "mi"
 
 
 def visibility_display(miles_text: str, mode: str) -> str:
     if miles_text == "—":
         return "—"
     value = visibility(miles_text, mode)
-    if value == miles_text and mode != "US":
+    if value == miles_text and mode in ("Metric", "Hybrid"):
         try:
             float(miles_text)
         except (TypeError, ValueError):
@@ -58,12 +58,24 @@ def visibility_display(miles_text: str, mode: str) -> str:
 
 
 def snow(mm: float, mode: str) -> str:
-    return f"{mm / 25.4:.1f} in" if mode != "Metric" else f"{mm / 10:.1f} cm"
+    return f"{mm / 10:.1f} cm" if mode in ("Metric", "UK Hybrid") else f"{mm / 25.4:.1f} in"
 
 
 def ice(mm: float, mode: str) -> str:
-    return f"{mm / 25.4:.1f} in" if mode != "Metric" else f"{mm:.1f} mm"
+    return f"{mm:.1f} mm" if mode in ("Metric", "UK Hybrid") else f"{mm / 25.4:.1f} in"
 
 
 def speed_kmh(kmh: float, mode: str) -> str:
-    return f"{kmh * 0.621371:.0f} mph" if mode == "US" else f"{kmh:.0f} km/h"
+    return f"{kmh * 0.621371:.0f} mph" if mode in ("US", "UK Hybrid") else f"{kmh:.0f} km/h"
+
+
+def nws_wind_text(text: str, mode: str) -> str:
+    """Convert only explicit SI wind speeds in NWS forecast prose."""
+    if mode != "UK Hybrid":
+        return text
+    def range_mph(match):
+        low, high = float(match[1]), float(match[2])
+        return f"{low * 0.621371:.0f} to {high * 0.621371:.0f} mph"
+    text = re.sub(r"\b(\d+(?:\.\d+)?) to (\d+(?:\.\d+)?) km/h\b", range_mph, text)
+    return re.sub(r"\b(\d+(?:\.\d+)?) km/h\b",
+                  lambda match: f"{float(match[1]) * 0.621371:.0f} mph", text)

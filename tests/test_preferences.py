@@ -17,6 +17,9 @@ class PreferencesTests(unittest.TestCase):
                 saved["units"] = "Metric"
                 preferences.save(saved)
                 self.assertEqual(preferences.load()["units"], "Metric")
+                saved["units"] = "UK Hybrid"
+                preferences.save(saved)
+                self.assertEqual(preferences.load()["units"], "UK Hybrid")
 
     def test_linux_autostart_is_opt_in_and_reversible(self):
         with tempfile.TemporaryDirectory() as folder:
