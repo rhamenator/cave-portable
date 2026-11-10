@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5 — 2026-11-10
+
+- Map NWS winter and other zone-based alerts using NOAA's public forecast-zone boundaries when the alert has no polygon. Keep any remaining unmapped alerts visible in the status.
+- Draw active ECCC weather-alert polygons on a decoded radar map for Canadian saved locations, with publication, validity, and expiry times when supplied.
+- Show nearby ECCC city forecast wording in the Canadian local briefing. The source text can include snow or ice amounts, but it is not an interpolated point accumulation.
+- Show NWS categorical rain, snow, and freezing precipitation types for their valid periods, alongside the existing grid peaks. Decode combined day/hour forecast intervals correctly.
+- Replay the 2022 Michigan winter storm with archived KGRR radar and KLAN observations; document why archived issued grids and alerts are still required to measure forecast error or warning lead time.
+
 ## 0.4.4 — 2026-11-10
 
 - Keep US alert polygons from the selected radar's state visible on the decoded map for Canadian locations near the border. Identify the state-only coverage and alerts that lack polygons; local Canadian ECCC alerts remain separate.

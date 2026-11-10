@@ -44,7 +44,7 @@ def _time(value) -> datetime | None:
         return None
 
 
-def _alert_rows(payload: dict, current: datetime):
+def _alert_rows(payload: dict, current: datetime, zones: dict | None = None):
     if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
         raise data.DataError("NWS alert geometry was invalid")
     result = []
@@ -60,7 +60,12 @@ def _alert_rows(payload: dict, current: datetime):
         kind = next((name for name in ("warning", "watch", "advisory")
                      if event.lower().endswith(name)), None)
         if kind:
-            result.append((kind, event, _rings(item.get("geometry")),
+            rings = _rings(item.get("geometry"))
+            if not rings and zones:
+                for url in props.get("affectedZones") or []:
+                    zone = str(url).rsplit("/", 1)[-1]
+                    rings.extend(zones.get(zone, []))
+            result.append((kind, event, rings,
                            _time(props.get("sent")), _time(props.get("effective")), expires))
     return result
 
@@ -86,12 +91,71 @@ def _radar_state(lat: float, lon: float):
 
 
 @lru_cache(maxsize=64)
-def _state_alerts(state: str, cache_slot: int):
+def _zone_geometries(state: str, bbox: str, cache_slot: int):
+    del cache_slot
+    west, south, east, north = (float(v) for v in bbox.split(","))
+    params = {"where": f"state = '{state}'", "geometry": f"{west},{south},{east},{north}",
+              "geometryType": "esriGeometryEnvelope", "inSR": "4326", "outSR": "4326",
+              "spatialRel": "esriSpatialRelIntersects", "outFields": "state,zone,state_zone",
+              "returnGeometry": "true", "geometryPrecision": "3", "maxAllowableOffset": "0.005",
+              "f": "geojson"}
+    url = ("https://mapservices.weather.noaa.gov/static/rest/services/"
+           "nws_reference_maps/nws_reference_map/MapServer/8/query?" + urlencode(params))
+    payload = data._json(url)
+    if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+        raise data.DataError("NOAA forecast zone geometry was invalid")
+    result = {}
+    for feature in payload["features"][:500]:
+        props = feature.get("properties", {}) if isinstance(feature, dict) else {}
+        if props.get("state") != state:
+            continue
+        zone = str(props.get("zone", ""))
+        if re.fullmatch(r"\d{3}", zone):
+            result[f"{state}Z{zone}"] = _rings(feature.get("geometry"))
+    return result
+
+
+@lru_cache(maxsize=64)
+def _state_alerts(state: str, bbox: str, cache_slot: int):
     del cache_slot
     if not re.fullmatch(r"[A-Z]{2}", state):
         raise data.DataError("Invalid US alert area")
     payload = data._json("https://api.weather.gov/alerts/active?" + urlencode({"area": state}))
-    return _alert_rows(payload, datetime.now(timezone.utc))
+    if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+        raise data.DataError("NWS alert geometry was invalid")
+    zones = {}
+    if any(isinstance(item, dict) and not _rings(item.get("geometry"))
+           for item in payload.get("features", [])):
+        try:
+            zones = _zone_geometries(state, bbox, int(datetime.now(timezone.utc).timestamp()) // 300)
+        except data.DataError:
+            pass  # Keep polygon alerts visible when the zone service is unavailable.
+    return _alert_rows(payload, datetime.now(timezone.utc), zones)
+
+
+@lru_cache(maxsize=32)
+def _canadian_alerts(bbox: str, cache_slot: int):
+    del cache_slot
+    params = {"bbox": bbox, "limit": 100, "f": "json"}
+    payload = data._json("https://api.weather.gc.ca/collections/weather-alerts/items?" + urlencode(params))
+    if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+        raise data.DataError("ECCC alert geometry was invalid")
+    matched = payload.get("numberMatched")
+    if isinstance(matched, (int, float)) and matched > len(payload["features"]):
+        raise data.DataError("ECCC alert map query was incomplete")
+    now = datetime.now(timezone.utc)
+    result = []
+    for item in payload["features"]:
+        props = item.get("properties", {}) if isinstance(item, dict) else {}
+        kind = str(props.get("alert_type", "")).lower()
+        expires = _time(props.get("expiration_datetime"))
+        status = str(props.get("status_en", "")).lower()
+        if kind not in ("warning", "watch", "advisory") or not expires or expires <= now or status in ("cancelled", "ended", "expired", "test"):
+            continue
+        result.append((kind, str(props.get("alert_name_en") or kind)[:90],
+                       _rings(item.get("geometry")), _time(props.get("publication_datetime")),
+                       _time(props.get("validity_datetime")), expires))
+    return result
 
 
 @lru_cache(maxsize=32)
@@ -138,7 +202,8 @@ def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None
          include_spc: bool = True, include_alerts: bool = True,
          scan_time: datetime | None = None,
          radar_point: tuple[float, float] | None = None,
-         include_local_alerts: bool = True) -> tuple[Image.Image, str]:
+         include_local_alerts: bool = True,
+         include_canadian_alerts: bool = False) -> tuple[Image.Image, str]:
     """Paint source geometries and name missing overlays in the returned status."""
     west, south, east, north = (float(value) for value in bbox.split(","))
     output = image.copy().convert("RGB")
@@ -171,7 +236,7 @@ def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None
     if include_alerts and radar_point is not None:
         try:
             state = _radar_state(round(radar_point[0], 4), round(radar_point[1], 4))
-            area_alerts = _state_alerts(state, int(now.timestamp()) // 300)
+            area_alerts = _state_alerts(state, bbox, int(now.timestamp()) // 300)
             visible = 0
             active_area_alerts = [row for row in area_alerts if row[5] > now]
             for kind, _event, rings, _sent, _effective, _expires in active_area_alerts:
@@ -183,7 +248,7 @@ def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None
                 paint(rings, {"warning": "#e02238", "watch": "#f1c128", "advisory": "#7b6ac7"}[kind], 4)
             unmapped = sum(not rings for _kind, _event, rings, _sent, _effective, _expires in active_area_alerts)
             notes.append(f"NWS {state} border context: {visible} polygon(s) in map; "
-                         f"{unmapped} state alert(s) lack polygons "
+                         f"{unmapped} state alert(s) unmapped "
                          f"(checked {now:%H:%M} UTC; {state} only)")
             for kind, event, rings, sent, _effective, expires in active_area_alerts[:2]:
                 if rings and visible:
@@ -192,6 +257,19 @@ def draw(image: Image.Image, bbox: str, point: tuple[float, float] | None = None
                                  + f"expires {expires:%H:%M} UTC")
         except data.DataError:
             notes.append("NWS US border alert layer unavailable")
+    if include_alerts and include_canadian_alerts:
+        try:
+            canadian = _canadian_alerts(bbox, int(now.timestamp()) // 300)
+            for kind, _event, rings, _issued, _valid, _expires in canadian:
+                paint(rings, {"warning": "#e02238", "watch": "#f1c128", "advisory": "#7b6ac7"}[kind], 4)
+            notes.append(f"ECCC alerts: {len(canadian)} current in map (checked {now:%H:%M} UTC)")
+            for _kind, event, _rings_data, issued, valid, expires in canadian[:2]:
+                times = [f"issued {issued:%d %b %H:%M} UTC" if issued else None,
+                         f"valid {valid:%d %b %H:%M} UTC" if valid else None,
+                         f"expires {expires:%d %b %H:%M} UTC"]
+                notes.append(f"ECCC {event}: " + ", ".join(t for t in times if t))
+        except data.DataError:
+            notes.append("ECCC alert overlay unavailable")
     if include_alerts and include_local_alerts and point is not None:
         try:
             alerts = [row for row in _local_alerts(round(point[0], 4), round(point[1], 4),

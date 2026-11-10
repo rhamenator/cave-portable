@@ -7,7 +7,7 @@
 
 The app checks while it is running, once a minute. A new warning uses the system bell and a message box; a new watch opens a message box without the bell. On Linux Wayland, an available system tray indicator shows a red badge for a warning and yellow for a watch, with warnings taking precedence. It does not transmit alerts, receive broadcast or cellular messages, use an official EAS or Alert Ready tone, or guarantee delivery. It never uses IP location. Postal centroids and address geocodes are approximate; a boundary-area warning may be missed or shown unexpectedly.
 
-The decoded radar map separately requests current NWS alerts for the selected US radar's state, even when the saved point is in Canada. It draws available polygons that overlap the viewport and labels state-only coverage and alerts without polygons. It does not turn a Michigan alert into a Canadian local warning, and it does not yet map ECCC polygons or NWS zone boundaries.
+The decoded radar map separately requests current NWS alerts for the selected US radar's state, even when the saved point is in Canada. It draws supplied polygons and uses [NOAA forecast-zone boundaries](https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/MapServer/8) for zone alerts whose NWS GeoJSON geometry is empty. Canadian saved locations also draw current [ECCC GeoMet weather-alert polygons](https://api.weather.gc.ca/collections/weather-alerts). The map labels unmapped US alerts, source times where supplied, and the US state-only scope. A Michigan alert is not treated as a Canadian local warning. Map layers are contextual; the point alert monitor remains a separate query for the saved location.
 
 ## Other hazards and AMBER alerts
 
