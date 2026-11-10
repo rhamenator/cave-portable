@@ -24,6 +24,8 @@ FIELDS = {
     "2 m relative humidity": ("Relative_humidity_height_above_ground", "0,100", "%", "2"),
     "2 m dewpoint": ("Dewpoint_temperature_height_above_ground", "240,310", "K", "2"),
     "Surface lifted index": ("Surface_Lifted_Index_surface", "-12,12", "K", None),
+    "Storm-relative helicity layer": ("Storm_relative_helicity_height_above_ground_layer", "-200,600", "m²/s²", "1500"),
+    "500 hPa wind speed": ("u-component_of_wind_isobaric:v-component_of_wind_isobaric-mag", "0,60", "m/s", "50000"),
 }
 RUN_CHOICES = ("Latest run", "Previous run", "2 runs back", "3 runs back")
 RUN_PATH = re.compile(r"^grib/NCEP/GFS/Global_0p25deg/GFS_Global_0p25deg_(\d{8})_(\d{4})\.grib2$")

@@ -4,7 +4,7 @@ See the [native-code assessment](PORTING_ASSESSMENT.md) for measured performance
 
 ## Current release
 
-0.4.0 adds decoded Level III base Doppler velocity and selectable tilts 0–3 to reflectivity and dual-pol products, a mapped NOAA MRMS 30-minute MESH maximum, and GFS surface lifted index. The app still lacks decoded Level II data, EDEX integration, soundings, and independently validated severe-weather prediction. The older storm-relative velocity and hydrometeor products are upstream imagery.
+0.4.1 adds a timestamp-based airport pressure trend and GFS storm-relative helicity and 500 hPa wind-speed layers. The research-only outlook replay selects SPC polygons that were actually issued by a requested time. See [weather intelligence and validation](INTELLIGENCE_RESEARCH.md). The app still lacks decoded Level II data, EDEX integration, soundings, and independently validated severe-weather prediction. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 ## Next milestones
 

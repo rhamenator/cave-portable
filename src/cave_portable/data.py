@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-USER_AGENT = "CAVE-Portable/0.3.2 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.4.1 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
@@ -51,6 +51,24 @@ class Observation:
     conditions: str = "—"
     lat: float | None = None
     lon: float | None = None
+
+
+@dataclass(frozen=True)
+class StationTrend:
+    station: str
+    latest: datetime
+    span_hours: float
+    report_count: int
+    altimeter_change_hpa_per_hour: float
+    dewpoint_c: float | None
+
+    def summary(self) -> str:
+        direction = ("rising" if self.altimeter_change_hpa_per_hour > .2 else
+                     "falling" if self.altimeter_change_hpa_per_hour < -.2 else "steady")
+        dewpoint = (f" · dewpoint {self.dewpoint_c:.1f} °C" if self.dewpoint_c is not None else "")
+        return (f"{self.station} · {self.span_hours:.1f} h altimeter {direction}"
+                f" {abs(self.altimeter_change_hpa_per_hour):.1f} hPa/h ({self.report_count} reports){dewpoint}"
+                f" · {self.latest:%H:%M UTC} · observation only, not a severe-weather forecast")
 
 
 @dataclass(frozen=True)
@@ -120,6 +138,42 @@ def metars(stations: tuple[str, ...] = STATIONS) -> list[Observation]:
     if not isinstance(payload, list):
         raise DataError("Unexpected METAR response")
     return _normalize_metars(payload)
+
+
+def station_trend(station: str, now: datetime | None = None) -> StationTrend:
+    """Describe recent airport observations using their actual report timestamps."""
+    station = validate_station(station)
+    url = "https://aviationweather.gov/api/data/metar?" + urlencode({"ids": station, "format": "json", "hours": 4})
+    payload = _json(url)
+    if not isinstance(payload, list) or len(payload) > 300:
+        raise DataError("Station history was invalid or too large")
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    readings = {}
+    for row in payload:
+        if not isinstance(row, dict) or row.get("icaoId") != station:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(str(row["reportTime"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+            altimeter = float(row["altim"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (-timedelta(minutes=5) <= current - timestamp <= timedelta(hours=4)
+                and 870 <= altimeter <= 1080 and math.isfinite(altimeter)):
+            continue
+        dewpoint = row.get("dewp")
+        if not isinstance(dewpoint, (int, float)) or not math.isfinite(dewpoint) or not -80 <= dewpoint <= 50:
+            dewpoint = None
+        readings[timestamp] = (altimeter, dewpoint)
+    ordered = sorted(readings.items())
+    if len(ordered) < 2 or current - ordered[-1][0] > timedelta(minutes=90):
+        raise DataError("Recent station history is insufficient")
+    latest_time, (latest_altimeter, latest_dewpoint) = ordered[-1]
+    oldest_time, (oldest_altimeter, _) = ordered[0]
+    hours = (latest_time - oldest_time).total_seconds() / 3600
+    if hours < 1.5:
+        raise DataError("Station history does not span enough time")
+    return StationTrend(station, latest_time, hours, len(ordered),
+                        (latest_altimeter - oldest_altimeter) / hours, latest_dewpoint)
 
 
 def _normalize_metars(payload: list) -> list[Observation]:

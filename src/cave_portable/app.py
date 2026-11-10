@@ -62,6 +62,7 @@ class App:
         self.forecast_text = tk.StringVar(value="Loading local NWS forecast…")
         self.hourly_text = tk.StringVar(value="Loading local NWS hourly forecast…")
         self.local_current = tk.StringVar(value="Nearby observation loading…")
+        self.station_trend_text = tk.StringVar(value="Selected airport trend loading…")
         self.local_alert_text = tk.StringVar(value="Local official warnings and watches loading…")
         self.hail_text = tk.StringVar(value="MRMS MESH hail estimate: select Check hail for an on-demand reading")
         self.resize_job: str | None = None
@@ -227,6 +228,8 @@ class App:
         briefing = ttk.LabelFrame(self.observations_tab, text="Selected location briefing · official sources", padding=6)
         briefing.pack(fill="x", pady=(0, 6))
         ttk.Label(briefing, textvariable=self.local_current, foreground=FG).pack(anchor="w")
+        ttk.Label(briefing, textvariable=self.station_trend_text, foreground=MUTED,
+                  wraplength=880, justify="left").pack(anchor="w")
         ttk.Label(briefing, textvariable=self.local_alert_text, foreground=FG,
                   wraplength=880, justify="left").pack(anchor="w")
         ttk.Label(briefing, textvariable=self.guidance_text, foreground=FG,
@@ -410,6 +413,8 @@ class App:
                     self.hail_text.set(f"MRMS MESH hail estimate unavailable: {exc}")
                 elif key == "local-alert-summary":
                     self.local_alert_text.set(f"Official local alert feed unavailable: {exc}")
+                elif key == "station-trend":
+                    self.station_trend_text.set(f"Selected airport trend unavailable: {exc}")
                 elif key in ("location", "local-weather"):
                     self.point_status.set(f"Local weather unavailable: {exc}")
                     if key == "local-weather":
@@ -421,6 +426,7 @@ class App:
         if tab == 0:
             stations = tuple(dict.fromkeys((self._station_for_settings(), *data.STATIONS)))
             self._submit("observations", lambda: data.metars(stations), self._show_observations)
+            self._refresh_station_trend()
             self._refresh_guidance()
         elif tab == 1:
             choice, site = self.radar_product.get(), self.radar_site.get()
@@ -502,6 +508,24 @@ class App:
             self._submit("point-forecast", lambda: (target, data.point_forecast(lat, lon)), self._show_nws_forecast)
         if "hourly" not in self.guidance_last_fetch or now - self.guidance_last_fetch["hourly"] >= timedelta(minutes=10):
             self._submit("hourly-forecast", lambda: (target, data.hourly_forecast(lat, lon)), self._show_hourly_forecast)
+
+    def _refresh_station_trend(self):
+        station = self._station_for_settings()
+        now = datetime.now(timezone.utc)
+        if (getattr(self, "station_trend_station", None) == station
+                and "station-trend" in self.guidance_last_fetch
+                and now - self.guidance_last_fetch["station-trend"] < timedelta(minutes=10)):
+            return
+        self._submit("station-trend", lambda: (station, data.station_trend(station)), self._show_station_trend)
+
+    def _show_station_trend(self, result):
+        station, trend = result
+        if station != self._station_for_settings():
+            self.root.after(0, self._refresh_station_trend)
+            return
+        self.station_trend_station = station
+        self.guidance_last_fetch["station-trend"] = datetime.now(timezone.utc)
+        self.station_trend_text.set(trend.summary())
 
     def _show_spc_guidance(self, result):
         target, outlook = result

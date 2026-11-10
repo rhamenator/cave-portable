@@ -41,7 +41,7 @@ jobs:
       - name: Verify Linux GTK import
         if: runner.os == 'Linux'
         run: python -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk; print(Gtk.get_major_version())'
-      - run: python -m pip install . pyinstaller
+      - run: python -m pip install '.[research]' pyinstaller
       - name: Match CFFI to Linux GTK runtime
         if: runner.os == 'Linux'
         run: python -m pip install 'cffi==1.16.0'

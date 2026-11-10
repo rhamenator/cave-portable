@@ -169,6 +169,9 @@ class App:
         briefing_box.set_border_width(5)
         self.local_current_label = label("Nearby observation loading…")
         briefing_box.pack_start(self.local_current_label, False, False, 0)
+        self.station_trend_label = label("Selected airport trend loading…")
+        self.station_trend_label.set_line_wrap(True)
+        briefing_box.pack_start(self.station_trend_label, False, False, 0)
         self.local_alert_label = label("Local official warnings and watches loading…")
         briefing_box.pack_start(self.local_alert_label, False, False, 0)
         local_guidance = label("SPC point outlook loading…")
@@ -336,6 +339,8 @@ class App:
                 self.hail_label.set_text(f"MRMS MESH hail estimate unavailable: {exc}")
             elif key == "local-alert-summary":
                 self.local_alert_label.set_text(f"Official local alert feed unavailable: {exc}")
+            elif key == "station-trend":
+                self.station_trend_label.set_text(f"Selected airport trend unavailable: {exc}")
         return False
 
     def refresh(self):
@@ -343,6 +348,7 @@ class App:
         if tab == 0:
             stations = tuple(dict.fromkeys((self.valid_station(), *data.STATIONS)))
             self.submit("observations", lambda: data.metars(stations), self.show_observations)
+            self.refresh_station_trend()
             self.refresh_guidance()
         elif tab == 1:
             product = self.radar_product.get_active_text()
@@ -431,6 +437,24 @@ class App:
             self.submit("point-forecast", lambda: (target, data.point_forecast(lat, lon)), self.show_nws_forecast)
         if "hourly" not in self.guidance_last_fetch or now - self.guidance_last_fetch["hourly"] >= timedelta(minutes=10):
             self.submit("hourly-forecast", lambda: (target, data.hourly_forecast(lat, lon)), self.show_hourly_forecast)
+
+    def refresh_station_trend(self):
+        station = self.valid_station()
+        now = datetime.now(timezone.utc)
+        if (getattr(self, "station_trend_station", None) == station
+                and "station-trend" in self.guidance_last_fetch
+                and now - self.guidance_last_fetch["station-trend"] < timedelta(minutes=10)):
+            return
+        self.submit("station-trend", lambda: (station, data.station_trend(station)), self.show_station_trend)
+
+    def show_station_trend(self, result):
+        station, trend = result
+        if station != self.valid_station():
+            self.refresh_station_trend()
+            return
+        self.station_trend_station = station
+        self.guidance_last_fetch["station-trend"] = datetime.now(timezone.utc)
+        self.station_trend_label.set_text(trend.summary())
 
     def show_spc_guidance(self, result):
         target, outlook = result

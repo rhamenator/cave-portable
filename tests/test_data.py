@@ -7,6 +7,21 @@ from cave_portable import data
 
 
 class DataTests(unittest.TestCase):
+    @patch.object(data, "_json")
+    def test_station_trend_uses_report_times_and_rejects_stale_history(self, fetch):
+        now = datetime(2026, 11, 10, 4, tzinfo=timezone.utc)
+        fetch.return_value = [
+            {"icaoId": "KLAN", "reportTime": "2026-11-10T00:00:00Z", "altim": 1018, "dewp": 7},
+            {"icaoId": "KLAN", "reportTime": "2026-11-10T03:00:00Z", "altim": 1015, "dewp": 8},
+            {"icaoId": "KGRR", "reportTime": "2026-11-10T03:30:00Z", "altim": 980, "dewp": 15},
+        ]
+        trend = data.station_trend("KLAN", now)
+        self.assertEqual(trend.report_count, 2)
+        self.assertEqual(trend.altimeter_change_hpa_per_hour, -1)
+        self.assertIn("not a severe-weather forecast", trend.summary())
+        with self.assertRaisesRegex(data.DataError, "insufficient"):
+            data.station_trend("KLAN", now + timedelta(hours=2))
+
     def test_station_validation_blocks_url_injection(self):
         self.assertEqual(data.validate_station(" kdtw "), "KDTW")
         for invalid in ("", "DTW", "KDTW&x=1", "../a", "éAAA"):

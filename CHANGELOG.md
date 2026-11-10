@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — 2026-11-09
+
+- Show a time-based altimeter trend from recent airport reports in the local briefing. Label it as an observation, not a storm forecast.
+- Add live-tested GFS storm-relative helicity and 500 hPa wind-speed forecast layers; neither is presented as a calibrated severe probability or a computed shear value.
+- Add a research-only archived SPC outlook replay that selects only polygons issued before the requested as-of time. Compare Webberville, Elkhorn, and Newcastle/Moore outlooks and document the validation cohort, including active-weather regions and quiet-day controls.
+- Review privately archived colleague forecast code. No saved, timestamped forecasts were available to verify its claimed advance skill; no private source or assets were copied.
+
 ## 0.4.0 — 2026-11-09
 
 - Decode NOAA Level III base Doppler velocity and select elevation tilts 0–3 for decoded reflectivity and dual-pol fields. Correct digital radial value scaling at the first data code.
