@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 — 2026-11-09
+
+- Correct Linux release packaging after the initial 0.3.0 tag failed the GTK/ecCodes CFFI check. All four platform bundles built in the follow-up workflow.
+
 ## 0.3.0 — 2026-11-09
 
 - Decode and render live NOAA Level III digital reflectivity, correlation coefficient, ZDR, and KDP for selected radar sites, with scan timeline, geographic zoom/pan, value inspection, scan time, tilt, and palette. Mask dual-pol values below 10 dBZ reflectivity. Low CC alone cannot confirm debris.
