@@ -11,9 +11,9 @@ requires-python = ">=3.10"
 license = "GPL-3.0-only"
 authors = [{name = "CAVE Portable contributors"}]
 dependencies = ["Pillow>=10,<13", "eccodes>=2.43,<3", "h5py>=3.11,<4", "numpy>=1.24,<3", "pyproj>=3.6,<4"]
+keywords = ["weather", "radar", "rain radar", "UK weather", "United Kingdom", "Met Office", "weather warnings", "postcode", "satellite", "metar", "awips"]
 [project.optional-dependencies]
 research = ["pyshp>=2.3,<3", "shapely>=2,<3"]
-keywords = ["weather", "radar", "rain radar", "UK weather", "United Kingdom", "Met Office", "weather warnings", "postcode", "satellite", "metar", "awips"]
 
 [project.scripts]
 cave-portable = "cave_portable:main"
