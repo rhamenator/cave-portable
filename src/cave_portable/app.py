@@ -51,6 +51,7 @@ class App:
         self.image_sources: dict[str, tuple[str, Image.Image]] = {}
         self.image_urls: dict[str, str] = {}
         self.radar_sites = dict(radar.SITES)
+        self.radar_catalog_loaded = False
         self.radar_zoom = 1
         self.radar_center: tuple[float, float] | None = None
         self.radar_field: level3.Field | None = None
@@ -278,7 +279,7 @@ class App:
         self.table.bind("<Double-1>", lambda _event: self._open_selected_radar())
         self.details = tk.Text(self.observations_tab, height=3, wrap="word", bg="#172632", fg=FG, insertbackground=FG, relief="flat", padx=10, pady=8)
         self.details.pack(fill="x", pady=(8, 0))
-        self.details.insert("1.0", "Select an observation or load a station. METAR and TAF from NOAA Aviation Weather Center. Alerts from NWS.")
+        self.details.insert("1.0", "Select an observation or load a station. Global METAR and TAF from NOAA Aviation Weather Center; US state alerts from NWS.")
         self.details.configure(state="disabled")
         self.rows: dict[str, data.Observation] = {}
 
@@ -758,11 +759,14 @@ class App:
             self.refresh()
 
     def _load_radar_catalog(self):
+        if self.country.get() == "UK":
+            return
         self._submit("radar-catalog", radar.available_sites, self._accept_radar_catalog)
 
     def _accept_radar_catalog(self, sites):
         selected = self.radar_site.get().split(" · ")[0]
         self.radar_sites = sites
+        self.radar_catalog_loaded = True
         self.radar_site_picker.configure(values=tuple(sites))
         self.radar_site.set(next((name for name in sites if name.startswith(selected + " · ")), next(iter(sites))))
         if self.tabs.index(self.tabs.select()) == 1:
@@ -997,6 +1001,8 @@ class App:
             elif country == "US" and self.station.get().strip().upper() in ("EGLL", "CYYZ"):
                 self.station.set("KDTW")
             self.radar_center = None
+            if prior == "UK" and country != "UK" and not self.radar_catalog_loaded:
+                self.root.after(0, self._load_radar_catalog)
         if hasattr(self, "radar_timeline_picker"):
             for widget in (self.radar_timeline_picker, self.radar_tilt_picker):
                 widget.configure(state="disabled" if country == "UK" else "readonly")

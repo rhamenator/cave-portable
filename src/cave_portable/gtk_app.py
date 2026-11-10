@@ -73,6 +73,7 @@ class App:
         self.saved = preferences.load()
         self.unit_mode = self.saved.get("units", units.DEFAULT)
         self.radar_sites = dict(radar.SITES)
+        self.radar_catalog_loaded = False
         self.radar_zoom = 1
         self.radar_center: tuple[float, float] | None = None
         self.radar_field: level3.Field | None = None
@@ -684,6 +685,8 @@ class App:
             self.refresh()
 
     def load_radar_catalog(self):
+        if self.country.get_active_text() == "UK":
+            return False
         self.submit("radar-catalog", radar.available_sites, self.accept_radar_catalog)
         return False
 
@@ -691,6 +694,7 @@ class App:
         selected = self.radar_site.get_active_text()
         selected_id = selected.split(" · ")[0] if selected else "GRR"
         self.radar_sites = sites
+        self.radar_catalog_loaded = True
         self.updating_radar_catalog = True
         self.radar_site.remove_all()
         active = 0
@@ -700,7 +704,8 @@ class App:
                 active = index
         self.radar_site.set_active(active)
         self.updating_radar_catalog = False
-        self.status.set_text(f"Loaded {len(sites)} NWS radar sites")
+        if self.country.get_active_text() != "UK":
+            self.status.set_text(f"Loaded {len(sites)} NWS radar sites")
         if self.tabs.get_current_page() == 1:
             self.refresh()
 
@@ -912,6 +917,8 @@ class App:
             elif country == "US" and self.station.get_text().strip().upper() in ("EGLL", "CYYZ"):
                 self.station.set_text("KDTW")
             self.radar_center = None
+            if prior == "UK" and country != "UK" and not self.radar_catalog_loaded:
+                GLib.idle_add(self.load_radar_catalog)
         if hasattr(self, "tabs"):
             for index in range(self.tabs.get_n_pages()):
                 page = self.tabs.get_nth_page(index)
