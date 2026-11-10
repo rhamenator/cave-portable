@@ -70,6 +70,11 @@ class Level3Tests(unittest.TestCase):
         with self.assertRaises(DataError):
             level3.decode(sample[:150], "GRR", "N0C")
 
+    def test_wmo_office_can_differ_from_radar_site(self):
+        sample = synthetic_cc().replace(b"KGRR", b"KJAN").replace(b"N0CGRR", b"N0CDGX")
+        field = level3.decode(sample, "DGX", "N0C")
+        self.assertEqual(field.site, "DGX")
+
     @patch.object(level3, "_day_keys")
     def test_recent_keys_exclude_future_and_stale_scans(self, listing):
         listing.return_value = ["GRR_N0C_2026_11_10_00_01_00",

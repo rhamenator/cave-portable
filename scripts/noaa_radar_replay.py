@@ -44,13 +44,19 @@ def candidate_keys(site: str, product: str, as_of: datetime,
 
 
 def archived_field(site: str, product: str, as_of: datetime):
+    skipped = 0
     for key, stamp in candidate_keys(site, product, as_of):
-        field = decode(_fetch(BUCKET + quote(key), MAX_FILE, "application/octet-stream"), site, product)
+        try:
+            field = decode(_fetch(BUCKET + quote(key), MAX_FILE, "application/octet-stream"), site, product)
+        except DataError:
+            skipped += 1
+            continue
         if abs(field.time - stamp) > timedelta(minutes=2):
-            raise DataError("Archive key and decoded scan time did not agree")
+            skipped += 1
+            continue
         if field.time <= as_of and as_of - field.time <= timedelta(minutes=30):
-            return field, key
-    raise DataError("No decoded archived scan at or before this cutoff within 30 minutes")
+            return field, key, skipped
+    raise DataError(f"No decodable archived scan at or before cutoff within 30 minutes ({skipped} skipped)")
 
 
 def main() -> None:
@@ -66,20 +72,22 @@ def main() -> None:
         parser.error("Provide both --bbox and --output for an image")
     site = args.site.upper()
     product, _number, units = product_for_tilt(args.product, args.tilt)
-    field, key = archived_field(site, product, args.as_of)
+    field, key, skipped = archived_field(site, product, args.as_of)
     result = {"source": "NOAA archived NEXRAD Level III digital radial data via public Unidata bucket",
               "site": "K" + site, "product": args.product, "code": product,
               "scan_utc": field.time.isoformat(), "as_of_utc": args.as_of.isoformat(),
               "scan_age_minutes": round((args.as_of - field.time).total_seconds() / 60, 1),
               "elevation_degrees": field.elevation, "units": units, "archive_key": key,
+              "skipped_archive_candidates": skipped,
               "note": "Observed radar only; low CC alone does not confirm debris."}
     reflectivity = None
     if args.output and product[-1] in "CXK":
-        reflectivity, mask_key = archived_field(site, f"N{args.tilt}B", args.as_of)
+        reflectivity, mask_key, mask_skipped = archived_field(site, f"N{args.tilt}B", args.as_of)
         if abs(field.time - reflectivity.time) > timedelta(minutes=5):
             raise DataError("Reflectivity mask and selected scan do not match")
         result["reflectivity_mask_scan_utc"] = reflectivity.time.isoformat()
         result["reflectivity_mask_key"] = mask_key
+        result["reflectivity_mask_skipped_candidates"] = mask_skipped
         result["mask_rule"] = "Dual-pol values hidden where reflectivity is below 10 dBZ"
     if args.output:
         image = render(field, args.bbox, reflectivity)

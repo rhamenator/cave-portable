@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from cave_portable.data import DataError
 from scripts.noaa_radar_replay import archived_field, candidate_keys
 
 
@@ -23,9 +24,23 @@ class RadarReplayTests(unittest.TestCase):
         with patch("scripts.noaa_radar_replay.candidate_keys", return_value=keys), \
              patch("scripts.noaa_radar_replay._fetch", return_value=b"data"), \
              patch("scripts.noaa_radar_replay.decode", side_effect=decoded):
-            field, key = archived_field("OAX", "N0C", as_of)
+            field, key, skipped = archived_field("OAX", "N0C", as_of)
         self.assertEqual(field.time, decoded[1].time)
         self.assertEqual(key, keys[1][0])
+        self.assertEqual(skipped, 0)
+
+    def test_unsupported_archive_product_is_counted_and_skipped(self):
+        as_of = datetime(2024, 4, 26, 20, 30, tzinfo=timezone.utc)
+        keys = [("OAX_N0C_2024_04_26_20_29_21", datetime(2024, 4, 26, 20, 29, 21, tzinfo=timezone.utc)),
+                ("OAX_N0C_2024_04_26_20_27_00", datetime(2024, 4, 26, 20, 27, tzinfo=timezone.utc))]
+        good = SimpleNamespace(time=datetime(2024, 4, 26, 20, 27, 40, tzinfo=timezone.utc))
+        with patch("scripts.noaa_radar_replay.candidate_keys", return_value=keys), \
+             patch("scripts.noaa_radar_replay._fetch", return_value=b"data"), \
+             patch("scripts.noaa_radar_replay.decode", side_effect=[DataError("unsupported"), good]):
+            field, key, skipped = archived_field("OAX", "N0C", as_of)
+        self.assertEqual(field, good)
+        self.assertEqual(key, keys[1][0])
+        self.assertEqual(skipped, 1)
 
 
 if __name__ == "__main__":

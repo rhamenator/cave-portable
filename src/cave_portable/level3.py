@@ -167,7 +167,10 @@ def decode(raw: bytes, site: str, product: str) -> Field:
     first = raw.find(b"\r\r\n")
     second = raw.find(b"\r\r\n", first + 3)
     start = second + 3
-    if first < 0 or second < 0 or start + 120 > len(raw) or f"K{site}".encode() not in raw[:start]:
+    # The WMO originator names the forecast office and can differ from the
+    # radar site (for example KJAN for KDGX, or KFWD for KFWS).
+    if (first < 0 or second < 0 or start + 120 > len(raw)
+            or raw[first + 3:second] != f"{product}{site}".encode()):
         raise DataError("NEXRAD product header was invalid")
     try:
         code, julian, seconds, length, _source, _dest, _blocks = struct.unpack_from(">HHIIHHH", raw, start)
