@@ -85,6 +85,21 @@ class DataTests(unittest.TestCase):
         with self.assertRaisesRegex(data.DataError, "URL was invalid"):
             data.point_forecast(42.7761, -84.5997)
 
+    @patch.object(data, "_json")
+    def test_hourly_forecast_is_readable_and_checks_grid_url(self, fetch):
+        fetch.side_effect = [
+            {"properties": {"forecastHourly": "https://api.weather.gov/gridpoints/GRR/78,41/forecast/hourly"}},
+            {"properties": {"updateTime": datetime.now(timezone.utc).isoformat(), "periods": [
+                {"startTime": "2026-11-09T19:00:00-05:00", "temperature": 41,
+                 "temperatureUnit": "F", "shortForecast": "Cloudy",
+                 "probabilityOfPrecipitation": {"value": 20}}]}}
+        ]
+        self.assertIn("7 PM: 41°F, Cloudy, 20% precip", data.hourly_forecast(42.7761, -84.5997))
+        fetch.reset_mock(side_effect=True)
+        fetch.return_value = {"properties": {"forecastHourly": "https://example.com/unsafe"}}
+        with self.assertRaisesRegex(data.DataError, "URL was invalid"):
+            data.hourly_forecast(42.7761, -84.5997)
+
 
 if __name__ == "__main__":
     unittest.main()

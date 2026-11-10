@@ -2,11 +2,11 @@
 
 ## Current release
 
-0.2.1 adds KLAN selection with a Lansing-centered KGRR radar view, geographic +/− zoom on radar and regional forecast maps, structured SPC Day 1 point guidance, and readable NWS point forecasts. It retains national and single-site radar, satellite, Southern Plains MLCAPE, GFS CAPE, official SPC outlooks, required US ZIP or full Canadian postal entry for local weather, and opt-in NWS/ECCC weather alert monitoring. Radar and most map products still use upstream image services. It has no decoded Level II/III pipeline, AWIPS EDEX protocol integration, interactive geospatial layers, soundings, GFE editing, EAS/WEA reception, or warning issuance. Correlation coefficient and quantitative hail size products are not yet available in the verified live imagery feed. The hydrometeor hail category is qualitative. Canadian location uses an approximate FSA centroid.
+0.3.0 adds decoded NOAA Level III digital reflectivity, CC, ZDR, and KDP, plus map inspection, pan/zoom, a short scan timeline, official SPC/NWS boundaries, on-demand NOAA MRMS MESH hail estimate at a selected CONUS point, explicit GFS run/field/lead selection for CAPE/CIN/humidity/dewpoint, and a local briefing. These were exercised in a running Linux GTK build. The app still lacks decoded Level II and velocity data, mapped hail swaths, multi-tilt analysis, EDEX integration, soundings, and independently validated severe-weather prediction. The older storm-relative velocity and hydrometeor products are upstream imagery.
 
 ## Next milestones
 
-1. Decode current Level III or Level II radar data into timestamped fields for reflectivity, velocity, correlation coefficient, differential reflectivity, and hail estimates where the source supplies them. Preserve site, tilt, scan time, units, legend, and freshness checks. Do not use stale archived products as live imagery. See [CAVE capability research](CAVE_RESEARCH.md).
+1. Extend decoding to Level II and velocity data, additional tilts, and mapped hail estimates where sources supply them. Preserve site, tilt, scan time, units, legend, and freshness checks. Do not use stale archived products as live imagery. See [CAVE capability research](CAVE_RESEARCH.md).
 2. Interactive map with station, radar, satellite, and SPC polygon layers; pan/zoom and valid-time controls.
 3. Explicit model run selection, additional GFS/NAM/HRRR fields (shear, CIN, lapse rate, moisture), and uncertainty. Compose source-attributed multi-field forecast images. Avoid a severity score based on CAPE alone.
 4. Soundings and time series; probabilistic severe guidance with an explanation of SPC risk and hazard probabilities.

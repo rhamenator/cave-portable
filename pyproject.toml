@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cave-portable"
-version = "0.2.1"
+version = "0.3.0"
 description = "A lightweight, cross-platform weather visualization companion to AWIPS CAVE"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-only"
 authors = [{name = "CAVE Portable contributors"}]
-dependencies = ["Pillow>=10,<13"]
+dependencies = ["Pillow>=10,<13", "eccodes>=2.43,<3"]
 keywords = ["weather", "radar", "satellite", "metar", "awips"]
 
 [project.scripts]

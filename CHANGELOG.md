@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-11-09
+
+- Decode and render live NOAA Level III digital reflectivity, correlation coefficient, ZDR, and KDP for selected radar sites, with scan timeline, geographic zoom/pan, value inspection, scan time, tilt, and palette. Mask dual-pol values below 10 dBZ reflectivity. Low CC alone cannot confirm debris.
+- Overlay current SPC Day 1 outlook areas and NWS alerts at the selected US point on decoded radar, with clear status when an overlay is unavailable.
+- Add on-demand NOAA MRMS MESH hail-size estimate at and near the selected contiguous-US point, labelled as an algorithmic estimate with valid time.
+- Add explicit GFS run, forecast hour, CAPE, CIN, 2 m humidity, and 2 m dewpoint selections. Keep official SPC guidance separate from forecast ingredients.
+- Add a local briefing with current observation, alert count, SPC point outlook, readable NWS forecast, and next three hourly periods.
+
 ## 0.2.1 — 2026-11-09
 
 - Add KLAN to the observation list and use the nearest radar site when a station is selected. Selecting KLAN opens a Lansing-centered KGRR site image.

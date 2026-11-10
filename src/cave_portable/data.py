@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-USER_AGENT = "CAVE-Portable/0.2.1 (https://github.com/rhamenator/cave-portable)"
+USER_AGENT = "CAVE-Portable/0.3.0 (https://github.com/rhamenator/cave-portable)"
 STATIONS = (
     "KSEA", "KPDX", "KSFO", "KLAX", "KLAS", "KPHX", "KSLC", "KDEN",
     "KDFW", "KIAH", "KMSP", "KORD", "KDTW", "KLAN", "KATL", "KMIA", "KBOS",
@@ -212,6 +212,49 @@ def point_forecast(lat: float, lon: float) -> str:
     if not lines:
         raise DataError("NWS point forecast had no readable periods")
     return f"NWS point forecast · updated {updated:%d %b %H:%M UTC}\n" + "\n".join(lines)
+
+
+def hourly_forecast(lat: float, lon: float) -> str:
+    """Three readable local hours from the current NWS forecast grid."""
+    if not (math.isfinite(lat) and math.isfinite(lon) and 24 <= lat <= 50 and -126 <= lon <= -66):
+        raise DataError("NWS hourly forecast covers the contiguous US")
+    point = _json(f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}")
+    props = point.get("properties") if isinstance(point, dict) else None
+    url = props.get("forecastHourly") if isinstance(props, dict) else None
+    if not isinstance(url, str) or not re.fullmatch(
+        r"https://api\.weather\.gov/gridpoints/[A-Z]{3}/\d+,\d+/forecast/hourly", url):
+        raise DataError("NWS hourly forecast grid URL was invalid")
+    forecast = _json(url)
+    props = forecast.get("properties") if isinstance(forecast, dict) else None
+    periods = props.get("periods") if isinstance(props, dict) else None
+    if not isinstance(periods, list) or not periods:
+        raise DataError("NWS hourly forecast was unavailable")
+    try:
+        updated = datetime.fromisoformat(str(props["updateTime"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DataError("NWS hourly forecast time was invalid") from exc
+    if datetime.now(timezone.utc) - updated > timedelta(hours=18):
+        raise DataError("NWS hourly forecast is stale")
+    lines = []
+    for period in periods[:3]:
+        if not isinstance(period, dict):
+            continue
+        try:
+            when = datetime.fromisoformat(str(period["startTime"]).replace("Z", "+00:00"))
+            temperature = int(period["temperature"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        unit = str(period.get("temperatureUnit") or "")
+        if unit not in ("F", "C"):
+            continue
+        condition = str(period.get("shortForecast") or "conditions unavailable")[:60]
+        probability = period.get("probabilityOfPrecipitation")
+        chance = probability.get("value") if isinstance(probability, dict) else None
+        chance_text = f", {int(chance)}% precip" if isinstance(chance, (int, float)) and 0 <= chance <= 100 else ""
+        lines.append(f"{when.strftime('%I %p').lstrip('0')}: {temperature}°{unit}, {condition}{chance_text}")
+    if not lines:
+        raise DataError("NWS hourly forecast had no usable periods")
+    return f"Next hours · NWS updated {updated:%d %b %H:%M UTC}: " + " · ".join(lines)
 
 
 def alerts(state: str) -> list[tuple[str, str, str]]:

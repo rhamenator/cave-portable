@@ -42,6 +42,8 @@ jobs:
         if: runner.os == 'Linux'
         run: python -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk; print(Gtk.get_major_version())'
       - run: python -m pip install . pyinstaller
+      - name: Verify MRMS decoder dependency
+        run: python -c 'import eccodes; print(eccodes.codes_get_api_version())'
       - run: python -m unittest discover -s tests -v
       - run: pyinstaller --noconfirm --clean --onefile --windowed --name CAVE-Portable --collect-data cave_portable ${{ matrix.gtk }} ${{ matrix.icon }} launcher.py
       - name: Package bundle
